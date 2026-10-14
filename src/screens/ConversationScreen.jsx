@@ -1520,13 +1520,13 @@ export default function ConversationScreen() {
                                           {m.media ? (
                                             <MediaContent media={m.media} />
                                           ) : null}
-                                          {displayedText ? (
+                                          {displayedText || totalVersions > 0 ? (
                                             <MessageText
                                               className={
                                                 m.media ? "mt-1" : undefined
                                               }
                                             >
-                                              {displayedText}
+                                              {displayedText || "\u00a0"}
                                               {totalVersions > 1 ? (
                                                 <EditStepper
                                                   total={totalVersions}
@@ -1556,13 +1556,13 @@ export default function ConversationScreen() {
                                       {m.media ? (
                                         <MediaContent media={m.media} />
                                       ) : null}
-                                      {displayedText ? (
+                                      {displayedText || totalVersions > 0 ? (
                                         <MessageText
                                           className={
                                             m.media ? "mt-1" : undefined
                                           }
                                         >
-                                          {displayedText}
+                                          {displayedText || "\u00a0"}
                                           {totalVersions > 1 ? (
                                             <EditStepper
                                               total={totalVersions}
