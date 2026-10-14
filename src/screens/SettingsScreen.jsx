@@ -26,6 +26,7 @@ import { NavPositionSetting } from "@/components/NavPosition";
 import InboxDefaultTabSetting from "@/components/InboxDefaultTabSetting";
 import CountryCodeSetting from "@/components/CountryCodeSetting";
 import InstallAppSetting from "@/components/InstallAppSetting";
+import AIRepliesSetting from "@/components/AIRepliesSetting";
 import ScreenHeader from "@/components/ScreenHeader";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -355,6 +356,9 @@ export default function SettingsScreen() {
           <InstallAppSetting />
         </CardContent>
       </Card>
+
+      {/* AI replies */}
+      <AIRepliesSetting />
 
       {/* Account */}
       <Card>

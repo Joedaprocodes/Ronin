@@ -1,4 +1,5 @@
 import * as idb from "./idb";
+import { AI_SETTINGS_KEY } from "./ai";
 
 /**
  * App-owned localStorage keys. Deliberately an allow-list: we never call
@@ -10,6 +11,7 @@ const LOCAL_KEYS = [
   "nav-position",
   "inbox-default-tab",
   "default-country-code",
+  AI_SETTINGS_KEY,
 ];
 
 /**

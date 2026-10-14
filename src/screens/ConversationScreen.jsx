@@ -17,6 +17,7 @@ import {
   Plus,
   RefreshCw,
   SmilePlus,
+  Sparkles,
   Sticker as StickerIcon,
   Trash2,
   Users,
@@ -34,6 +35,7 @@ import {
   mediaLabel,
 } from "@/lib/media";
 import { imageToSticker } from "@/lib/sticker";
+import { TONES, generateReply, loadAiSettings } from "@/lib/ai";
 import { useInboxData } from "@/context/InboxDataContext";
 import { useThread } from "@/hooks/useThread";
 import { useOnline } from "@/hooks/useOnline";
@@ -511,6 +513,169 @@ function ReactionPicker({ onPick }) {
 }
 
 /**
+ * The AI reply picker beside the composer: pick a tone and Gemini drafts a
+ * reply into the message box, where it can be edited before sending.
+ *
+ * @param {{
+ *   messages: ConversationMessage[],
+ *   conversation: Conversation | null,
+ *   draft: string,
+ *   disabled?: boolean,
+ *   onGenerated: (text: string) => void,
+ * }} props
+ */
+function AiReplyPicker({
+  messages,
+  conversation,
+  draft,
+  disabled,
+  onGenerated,
+}) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const [hasKey, setHasKey] = useState(
+    () => Boolean(loadAiSettings().apiKey)
+  );
+  const abortRef = useRef(null);
+
+  // Leaving the chat mid-generation shouldn't leave a request in flight.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  function handleOpenChange(next) {
+    setOpen(next);
+    if (next) {
+      // Re-read on open so a key added in Settings elsewhere is picked up.
+      setHasKey(Boolean(loadAiSettings().apiKey));
+      setError("");
+      return;
+    }
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }
+
+  async function draftWith(tone) {
+    if (busyId) return;
+    setError("");
+    setBusyId(tone.id);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const text = await generateReply({
+        tone,
+        messages,
+        conversation,
+        draft,
+        signal: controller.signal,
+      });
+      onGenerated(text);
+      setOpen(false);
+    } catch (err) {
+      // An abort is ours (popover closed or chat left): not worth reporting.
+      if (err?.name !== "AbortError") {
+        setError(err?.message || "Couldn't draft a reply");
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <InputGroupButton
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Draft a reply with AI"
+            title="AI reply"
+            disabled={disabled}
+          />
+        }
+      >
+        <Sparkles />
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="w-64 p-1.5">
+        <p className="px-2 py-1 text-xs font-medium text-muted-foreground">
+          Draft a reply in a tone
+        </p>
+
+        {hasKey ? (
+          <div className="flex flex-col">
+            {TONES.map((tone) => (
+              <button
+                key={tone.id}
+                type="button"
+                onClick={() => draftWith(tone)}
+                disabled={Boolean(busyId)}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                <span aria-hidden className="text-base leading-none">
+                  {tone.emoji}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    {tone.label}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {tone.hint}
+                  </span>
+                </span>
+                {busyId === tone.id ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2 p-2">
+            <p className="text-xs text-muted-foreground">
+              Add your Gemini API key in Settings to draft replies here.
+            </p>
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                setOpen(false);
+                navigate("/settings");
+              }}
+            >
+              Open Settings
+            </Button>
+          </div>
+        )}
+
+        {error ? (
+          <p role="alert" className="px-2 py-1 text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+
+        {busyId ? (
+          <button
+            type="button"
+            onClick={() => {
+              abortRef.current?.abort();
+              abortRef.current = null;
+            }}
+            className="mt-0.5 w-full rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
+          >
+            Cancel
+          </button>
+        ) : hasKey ? (
+          <p className="px-2 py-1 text-xs text-muted-foreground">
+            The draft lands in the message box for review.
+          </p>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
  * The aggregate reaction pill under a bubble: up to three emojis with counts.
  * Tapping an emoji toggles it (adding it, or removing it when it is ours).
  *
@@ -584,6 +749,9 @@ export default function ConversationScreen() {
   const [attachment, setAttachment] = useState(null);
   // True while a picked image is being converted into a WebP sticker.
   const [preparingSticker, setPreparingSticker] = useState(false);
+  // AI replies are opt-in (Settings → AI replies); the composer's sparkle
+  // button only exists while the switch is on.
+  const [aiEnabled, setAiEnabled] = useState(() => loadAiSettings().enabled);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   // Edit/delete: the message a dialog is acting on, plus per-message reveal of
@@ -601,6 +769,7 @@ export default function ConversationScreen() {
   const [copiedId, setCopiedId] = useState(null);
   const fileInputRef = useRef(null);
   const stickerInputRef = useRef(null);
+  const composerRef = useRef(null);
   const topRef = useRef(null);
   const copyTimer = useRef(null);
 
@@ -638,6 +807,14 @@ export default function ConversationScreen() {
   }, [jid, visible, conversationUnread, markRead]);
 
   useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  // The AI switch lives in Settings, possibly in another tab: re-read it when
+  // this tab regains focus so the sparkle button appears/disappears with it.
+  useEffect(() => {
+    const sync = () => setAiEnabled(loadAiSettings().enabled);
+    window.addEventListener("focus", sync);
+    return () => window.removeEventListener("focus", sync);
+  }, []);
 
   // When scrolled to the top of the list, fetch the previous page. The scroller
   // keeps the scroll position, so prepended messages appear above what's shown.
@@ -718,6 +895,13 @@ export default function ConversationScreen() {
       .finally(() => {
         if (convertingSticker) setPreparingSticker(false);
       });
+  }
+
+  /** Drop a drafted reply into the composer so it can be reviewed and sent. */
+  function handleAiReply(text) {
+    setDraft(text);
+    setSendError("");
+    requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   async function handleSend() {
@@ -1444,9 +1628,19 @@ export default function ConversationScreen() {
                   >
                     <StickerIcon />
                   </InputGroupButton>
+                  {aiEnabled ? (
+                    <AiReplyPicker
+                      messages={messages}
+                      conversation={conversation}
+                      draft={draft}
+                      disabled={sending || !online}
+                      onGenerated={handleAiReply}
+                    />
+                  ) : null}
                 </InputGroupAddon>
 
                 <InputGroupTextarea
+                  ref={composerRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={handleComposerKeyDown}
