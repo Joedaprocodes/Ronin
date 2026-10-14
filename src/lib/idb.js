@@ -200,6 +200,42 @@ export async function pruneThread(jid, keep = 500) {
   return removed;
 }
 
+/* ------------------------------ Thread pages ------------------------------ */
+
+/** Cache key for a thread's live pagination cursor ({hasMore, nextBefore}). */
+export const threadCursorKey = (jid) => `thread/${jid}`;
+
+/** Cache key for a thread's oldest cached row, used to bound offline paging. */
+export const threadOldestKey = (jid) => `thread/${jid}/oldest`;
+
+/**
+ * Persist a freshly-fetched page of a thread: its messages (capped at the
+ * newest `keep`), the pagination cursor and the oldest-row marker.
+ *
+ * This is the whole write side of the thread cache, shared by the thread hook
+ * and the inbox prefetch, so both leave the cache in the same shape. The oldest
+ * marker is read back after the message writes settle so it points at the true
+ * oldest row. Best-effort: callers ignore rejections.
+ *
+ * @param {string} jid
+ * @param {{messages?: import("@/lib/api").MessageView[], hasMore?: boolean,
+ *   nextBefore?: string | null, keep?: number}} page
+ * @returns {Promise<void>}
+ */
+export async function putThreadPage(
+  jid,
+  { messages = [], hasMore, nextBefore, keep } = {}
+) {
+  if (!jid) return;
+  await putMessages(jid, messages);
+  await pruneThread(jid, keep);
+  await putMeta(threadCursorKey(jid), {
+    hasMore: hasMore === true && nextBefore != null,
+    nextBefore: nextBefore ?? null,
+  });
+  await putMeta(threadOldestKey(jid), await getThreadOldestCursor(jid));
+}
+
 /* ---------------------------------- Meta --------------------------------- */
 
 /**

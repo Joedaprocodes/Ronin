@@ -5,11 +5,11 @@ import {
   getMeta,
   getThread,
   getThreadOlder,
-  getThreadOldestCursor,
-  pruneThread,
   putConversations,
   putMessages,
-  putMeta,
+  putThreadPage,
+  threadCursorKey,
+  threadOldestKey,
 } from "@/lib/idb";
 import { decodeCursor, encodeCursor } from "@/lib/cursors";
 import { useInboxEventsListener } from "@/context/InboxEventsContext";
@@ -27,14 +27,12 @@ import { useOnline } from "@/hooks/useOnline";
  *
  * When the backend doesn't support pagination yet, `fetchThreadPage` returns
  * the whole thread with no `hasMore`, so the UI simply shows one page.
+ *
+ * A failed network load is only an error when there is nothing cached to show:
+ * with cached messages the thread keeps rendering (the UI flags that it's
+ * offline), which is what makes previously-opened chats readable offline.
  */
 const DEFAULT_PAGE_SIZE = 50;
-const KEEP_MESSAGES = 500;
-const CURSOR_KEY = (jid) => `thread/${jid}`;
-// Oldest cached row's cursor for a chat; tells offline paging when the cache
-// is exhausted (kept separately from CURSOR_KEY, which holds the live paging
-// cursor { hasMore, nextBefore }).
-const OLDEST_KEY = (jid) => `thread/${jid}/oldest`;
 
 function byTimeThenId(a, b) {
   const byTime = (a.time || "").localeCompare(b.time || "");
@@ -73,7 +71,7 @@ async function pageOlderFromCache(jid, cursor, limit) {
       // oldest message now shown (e.g. same-timestamp boundary rows), meaning
       // more cached rows exist even though a single next-page probe came back
       // empty. Compare the raw times/id (cursor strings are not ordered).
-      const marker = await getMeta(OLDEST_KEY(jid));
+      const marker = await getMeta(threadOldestKey(jid));
       const parsed = decodeCursor(marker);
       if (parsed) {
         const exhausted =
@@ -113,16 +111,6 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
 
   const online = useOnline();
 
-  /** Best-effort: keep the oldest cached row's cursor up to date. */
-  const persistOldestCursor = useCallback(async (jid) => {
-    try {
-      const oldest = await getThreadOldestCursor(jid);
-      await putMeta(OLDEST_KEY(jid), oldest);
-    } catch {
-      // best-effort; never break paging for a marker write
-    }
-  }, []);
-
   useEffect(() => {
     messagesRef.current = state.messages;
   }, [state.messages]);
@@ -159,7 +147,7 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
 
       // 2. Restore the pagination cursor so offline "load older" still works.
       try {
-        const cursor = await getMeta(CURSOR_KEY(jid));
+        const cursor = await getMeta(threadCursorKey(jid));
         if (cursor) base.hasMore = cursor.hasMore === true && cursor.nextBefore != null;
         if (cursor) base.nextBefore = cursor.nextBefore ?? null;
       } catch {
@@ -185,14 +173,14 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
           nextBefore: meta.nextBefore,
         });
 
-        // Persist everything (best-effort). The oldest-cursor marker is read
-        // back after both writes settle so it points at the true oldest row.
-        Promise.all([
-          putMessages(jid, merged).catch(() => {}),
-          pruneThread(jid, KEEP_MESSAGES).catch(() => {}),
-        ]).then(() => persistOldestCursor(jid));
+        // Persist the merged page: the messages, the pagination cursor and the
+        // oldest-row marker (best-effort; see putThreadPage).
+        putThreadPage(jid, {
+          messages: merged,
+          hasMore: meta.hasMore,
+          nextBefore: meta.nextBefore,
+        }).catch(() => {});
         if (page.conversation) putConversations([page.conversation]).catch(() => {});
-        putMeta(CURSOR_KEY(jid), meta).catch(() => {});
       } catch (err) {
         if (cancelled) return;
         // A 404 means this chat has no stored history yet (e.g. opening a chat
@@ -212,9 +200,17 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
           );
           return;
         }
-        // Offline or backend down: keep the cached data visible.
+        // Offline or backend down. Keep whatever the cache gave us and stop the
+        // spinner: this is only worth surfacing as an error when the screen
+        // would otherwise be empty (no cached messages to fall back on).
         setState((prev) =>
-          prev.jid === jid ? { ...prev, loading: false, error: err } : prev
+          prev.jid === jid
+            ? {
+                ...prev,
+                loading: false,
+                error: prev.messages.length === 0 ? err : null,
+              }
+            : prev
         );
       }
     })();
@@ -222,7 +218,7 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [jid, pageSize, persistOldestCursor]);
+  }, [jid, pageSize]);
 
   /**
    * Fetch the next (older) page and prepend it, preserving scroll position.
@@ -269,10 +265,11 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
             : prev
         );
 
-        putMessages(jid, merged)
-          .catch(() => {})
-          .then(() => persistOldestCursor(jid));
-        putMeta(CURSOR_KEY(jid), meta).catch(() => {});
+        putThreadPage(jid, {
+          messages: merged,
+          hasMore: page?.hasMore,
+          nextBefore: page?.nextBefore,
+        }).catch(() => {});
       } else {
         // Offline / unreachable backend: page older rows from the cache.
         const cached = await pageOlderFromCache(jid, nextBefore, pageSize);
@@ -291,10 +288,11 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
             : prev
         );
 
-        putMessages(jid, merged)
-          .catch(() => {})
-          .then(() => persistOldestCursor(jid));
-        putMeta(CURSOR_KEY(jid), meta).catch(() => {});
+        putThreadPage(jid, {
+          messages: merged,
+          hasMore: meta.hasMore,
+          nextBefore: meta.nextBefore,
+        }).catch(() => {});
       }
     } catch (err) {
       // Not fatal: keep whatever is already loaded.
@@ -303,7 +301,7 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
       setLoadingMore(false);
       loadingMoreRef.current = false;
     }
-  }, [jid, pageSize, state, online, persistOldestCursor]);
+  }, [jid, pageSize, state, online]);
 
   /** Re-fetch the newest page and merge (e.g. after sending a message). */
   const refresh = useCallback(async () => {
@@ -328,14 +326,22 @@ export function useThread(jid, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
           : prev
       );
 
-      putMessages(jid, merged).catch(() => {});
-      putMeta(CURSOR_KEY(jid), meta).catch(() => {});
+      putThreadPage(jid, {
+        messages: merged,
+        hasMore: page?.hasMore,
+        nextBefore: page?.nextBefore,
+      }).catch(() => {});
     } catch (err) {
-      // Background refresh failures are not fatal. A 404 just means the chat has
-      // no history yet, so keep the empty thread rather than surfacing an error.
+      // Background refresh failures are not fatal: a 404 just means the chat has
+      // no history yet, and with cached messages on screen there is nothing to
+      // report. Only surface an error when the thread would be left empty.
       setState((prev) =>
         prev.jid === jid
-          ? { ...prev, error: err?.status === 404 ? null : err }
+          ? {
+              ...prev,
+              error:
+                err?.status === 404 || prev.messages.length > 0 ? null : err,
+            }
           : prev
       );
     }

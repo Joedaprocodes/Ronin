@@ -15,6 +15,7 @@ import {
   PaperclipIcon,
   Pencil,
   Plus,
+  RefreshCw,
   SmilePlus,
   Sticker as StickerIcon,
   Trash2,
@@ -913,6 +914,11 @@ export default function ConversationScreen() {
         : "Direct message"
       : "";
 
+  // Offline with cached messages: the thread is readable, but it may be stale,
+  // so say so. The banner sits above the fixed-height scroller, which has to
+  // give up the same amount of room to keep the composer above the fold.
+  const showOfflineNote = !online && messages.length > 0;
+
   return (
     <div className="mx-auto w-full max-w-2xl py-4">
       <ScreenHeader
@@ -961,21 +967,46 @@ export default function ConversationScreen() {
         }
       />
 
+      {showOfflineNote ? (
+        <p className="mt-4 rounded-lg border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
+          Offline — showing the messages saved on this device.
+        </p>
+      ) : null}
+
       {loading ? (
         <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-dashed py-16 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
           Loading conversation…
         </div>
       ) : error && messages.length === 0 ? (
-        <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center">
+        <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
           <MessageSquare className="size-8 text-muted-foreground" />
-          <p className="text-sm font-medium">Couldn't load conversation</p>
-          <p className="text-sm text-muted-foreground">{error.message}</p>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              {online ? "Couldn't load conversation" : "You're offline"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {online
+                ? "The server didn't respond — check your connection, then try again."
+                : "This chat hasn't been saved to this device yet. Reconnect to load it."}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refresh()}>
+            {online ? <RefreshCw className="size-4" /> : null}
+            Try again
+          </Button>
         </div>
       ) : (
         <>
           {/* Thread */}
-          <div className="mt-4 h-[calc(100svh-6.5rem)] overflow-hidden bg-transparent">
+          <div
+            className={cn(
+              "mt-4 overflow-hidden bg-transparent",
+              showOfflineNote
+                ? "h-[calc(100svh-9.75rem)]"
+                : "h-[calc(100svh-6.5rem)]"
+            )}
+          >
             <MessageScrollerProvider autoScroll defaultScrollPosition="end">
               <MessageScroller>
                 <MessageScrollerViewport>

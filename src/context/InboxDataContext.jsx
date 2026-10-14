@@ -7,8 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { apiFetch, listConversations } from "@/lib/api";
-import { getConversations, persist, putConversations } from "@/lib/idb";
+import { apiFetch, fetchThreadPage, listConversations } from "@/lib/api";
+import {
+  getConversations,
+  persist,
+  putConversations,
+  putThreadPage,
+} from "@/lib/idb";
 import { useInboxEventsListener } from "@/context/InboxEventsContext";
 
 /**
@@ -32,6 +37,12 @@ const InboxDataContext = createContext(null);
 // Coalesce a burst of stream events into a single list refresh.
 const LIVE_REFRESH_MS = 400;
 
+// Threads only enter the IndexedDB cache by being opened, so the newest few are
+// prefetched in the background to keep them readable offline. Bounded, and each
+// chat is attempted at most once per session (see warmThreads).
+const WARM_THREADS = 10;
+const WARM_PAGE_SIZE = 50;
+
 // Used by screens that mount outside the provider (e.g. while signed out).
 const EMPTY_CONTEXT = {
   conversations: [],
@@ -50,18 +61,41 @@ export function InboxDataProvider({ children }) {
   const [error, setError] = useState(null);
   const refreshTimer = useRef(null);
 
+  // Chats whose thread we have already tried to warm this session, so that the
+  // refresh path (visibility changes, SSE bursts) can never become a fetch loop.
+  const warmedRef = useRef(new Set());
+
+  /**
+   * Warm the thread cache for the newest chats so tapping one while offline
+   * shows its messages instead of an empty error. Best-effort and silent: this
+   * never blocks or fails the inbox, and each chat is tried at most once per
+   * session (a chat that fails to warm simply loads on demand, as before).
+   */
+  const warmThreads = useCallback((list) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    for (const chat of list.slice(0, WARM_THREADS)) {
+      const jid = chat?.id ?? chat?.jid;
+      if (!jid || warmedRef.current.has(jid)) continue;
+      warmedRef.current.add(jid);
+      fetchThreadPage(jid, { limit: WARM_PAGE_SIZE })
+        .then((page) => putThreadPage(jid, page))
+        .catch(() => {});
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const list = await listConversations();
       setConversations(list);
       setError(null);
       putConversations(list).catch(() => {});
+      warmThreads(list);
       return list;
     } catch (err) {
       setError(err);
       return null;
     }
-  }, []);
+  }, [warmThreads]);
 
   // Initial load: render the cache immediately, then revalidate from the
   // network. The provider remounts whenever the signed-in user changes.
@@ -93,6 +127,7 @@ export function InboxDataProvider({ children }) {
         setConversations(list);
         setError(null);
         putConversations(list).catch(() => {});
+        warmThreads(list);
       } catch (err) {
         if (cancelled) return;
         // Keep the cached list; the error only shows in the empty state.
@@ -105,7 +140,7 @@ export function InboxDataProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [warmThreads]);
 
   // Ask the browser to keep our storage (once; nothing depends on the result).
   useEffect(() => {
