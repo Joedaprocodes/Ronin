@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Loader2, MessageSquare, Users } from "lucide-react";
+import { Download, Loader2, MessageSquare, Users } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import ScreenHeader from "@/components/ScreenHeader";
 import { getGroupInfo } from "@/lib/api";
+import { downloadCsv, toCsv } from "@/lib/csv";
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
@@ -65,6 +67,57 @@ function humanDuration(seconds) {
     }
   }
   return `${seconds} seconds`;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  CSV export                                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Column order of the exported sheet. */
+const CSV_HEADERS = ["Name", "Phone", "Role"];
+
+/**
+ * The Name column: display name, then @username, then blank when the Phone
+ * column already identifies the row — and the id as a last resort, so a
+ * LID-only member is never an anonymous line.
+ */
+function csvName(p) {
+  return p.name || p.username || (p.phone ? "" : p.id || "");
+}
+
+/** "Owner" / "Admin" / "Member" — the same rule the list shows as a badge. */
+function csvRole(p, group) {
+  if (isOwner(p, group)) return "Owner";
+  return p.admin ? "Admin" : "Member";
+}
+
+/** Header row + one row per participant, in WhatsApp's own order. */
+function csvRows(participants, group) {
+  return [
+    CSV_HEADERS,
+    ...participants.map((p) => [
+      csvName(p),
+      p.phone ? `+${p.phone}` : "",
+      csvRole(p, group),
+    ]),
+  ];
+}
+
+/**
+ * A tidy, collision-resistant filename: the subject slugified (ASCII) plus the
+ * UTC date, so repeated exports of the same group never overwrite each other.
+ */
+function csvFilename(subject) {
+  const slug = String(subject ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  const date = new Date().toISOString().slice(0, 10);
+  return `${slug || "group"}-participants-${date}.csv`;
 }
 
 /** Friendly text for the statuses the group endpoint can return. */
@@ -142,6 +195,11 @@ export default function GroupInfoScreen() {
   const subtitle = group
     ? `${count} ${count === 1 ? "participant" : "participants"}`
     : undefined;
+
+  /** Download the currently listed participants as a CSV file. */
+  function exportParticipants() {
+    downloadCsv(csvFilename(group?.name), toCsv(csvRows(participants, group)));
+  }
 
   const created = createdLabel(group?.createdAt);
   const ephemeral = group ? humanDuration(group.ephemeralDuration) : null;
@@ -242,6 +300,18 @@ export default function GroupInfoScreen() {
               <CardDescription>
                 {count} {count === 1 ? "member" : "members"}
               </CardDescription>
+              {participants.length > 0 ? (
+                <CardAction>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportParticipants}
+                  >
+                    <Download className="size-4" />
+                    Export CSV
+                  </Button>
+                </CardAction>
+              ) : null}
             </CardHeader>
 
             <CardContent>
