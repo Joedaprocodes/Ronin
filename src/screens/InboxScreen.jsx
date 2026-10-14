@@ -260,30 +260,32 @@ return (
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
-                      "truncate text-sm",
+                      "min-w-0 flex-1 truncate text-sm",
                       c.unread > 0 ? "font-semibold" : "font-medium"
                     )}
                   >
                     {c.name}
                   </span>
-                  {c.isGroup && (
-                    <Badge variant="secondary" className="shrink-0">
-                      Group
-                    </Badge>
-                  )}
-                  <Flag
-                    onClick={(e) => toggleFlag(e, c)}
-                    title={c.flagged ? "Remove flag" : "Flag conversation"}
-                    className={cn(
-                      "size-3.5 shrink-0 cursor-pointer",
-                      c.flagged
-                        ? "fill-current text-destructive"
-                        : "text-muted-foreground/40 hover:text-muted-foreground"
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {c.isGroup && (
+                      <Badge variant="secondary" className="shrink-0">
+                        Group
+                      </Badge>
                     )}
-                  />
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                    {c.time}
-                  </span>
+                    <Flag
+                      onClick={(e) => toggleFlag(e, c)}
+                      title={c.flagged ? "Remove flag" : "Flag conversation"}
+                      className={cn(
+                        "size-3.5 shrink-0 cursor-pointer",
+                        c.flagged
+                          ? "fill-current text-destructive"
+                          : "text-muted-foreground/40 hover:text-muted-foreground"
+                      )}
+                    />
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {c.time}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
