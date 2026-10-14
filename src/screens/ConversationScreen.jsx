@@ -33,6 +33,7 @@ import {
   mediaEmoji,
   mediaLabel,
 } from "@/lib/media";
+import { imageToSticker } from "@/lib/sticker";
 import { useInboxData } from "@/context/InboxDataContext";
 import { useThread } from "@/hooks/useThread";
 import { useOnline } from "@/hooks/useOnline";
@@ -243,6 +244,12 @@ function messageSnippet(message) {
     }`;
   }
   return message.text ?? "";
+}
+
+/** "cat.png" -> "cat.webp": the name shown for a converted sticker. */
+function stickerFileName(name) {
+  const base = (name ?? "").replace(/\.[^./\\]+$/, "").trim();
+  return `${base || "sticker"}.webp`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -575,6 +582,8 @@ export default function ConversationScreen() {
 
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState(null);
+  // True while a picked image is being converted into a WebP sticker.
+  const [preparingSticker, setPreparingSticker] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   // Edit/delete: the message a dialog is acting on, plus per-message reveal of
@@ -669,29 +678,45 @@ export default function ConversationScreen() {
       return;
     }
 
-    fileToBase64(file)
-      .then(({ data, mimeType }) => {
+    // WhatsApp only renders WebP stickers, so anything picked through the
+    // sticker picker is re-encoded (and squared to 512px) before it attaches.
+    const convertingSticker = forcedType === "sticker";
+    if (convertingSticker) {
+      setPreparingSticker(true);
+      setAttachment(null);
+    }
+    const reading =
+      convertingSticker
+        ? imageToSticker(file).then((sticker) => ({
+            data: sticker.data,
+            mimeType: sticker.mimeType,
+            name: stickerFileName(file.name),
+            size: sticker.size,
+          }))
+        : fileToBase64(file).then(({ data, mimeType }) => ({
+            data,
+            mimeType: mimeType || file.type,
+            name: file.name,
+            size: file.size,
+          }));
+
+    reading
+      .then(({ data, mimeType, name, size }) => {
         const type = forcedType ?? getMediaType(file.type);
         /** @type {import("@/lib/api").SendMedia} */
-        const media = {
-          type,
-          data,
-          mimeType: mimeType || file.type,
-        };
+        const media = { type, data, mimeType };
         // Documents must carry a filename for the backend to label them;
         // stickers are sent as bare images, so they don't.
         if (type === "document") media.fileName = file.name;
 
-        setAttachment({
-          name: file.name,
-          size: file.size,
-          type,
-          media,
-        });
+        setAttachment({ name, size, type, media });
         setSendError("");
       })
-      .catch(() => {
-        setSendError("Failed to read file");
+      .catch((err) => {
+        setSendError(err?.message || "Failed to read file");
+      })
+      .finally(() => {
+        if (convertingSticker) setPreparingSticker(false);
       });
   }
 
@@ -1333,6 +1358,13 @@ export default function ConversationScreen() {
                 >
                   <XIcon className="size-4" />
                 </Button>
+              </div>
+            ) : null}
+
+            {preparingSticker ? (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground shadow-lg shadow-black/5">
+                <Loader2 className="size-4 animate-spin" />
+                Converting image to a WebP sticker…
               </div>
             ) : null}
 
