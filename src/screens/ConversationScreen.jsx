@@ -41,6 +41,7 @@ import { useInboxData } from "@/context/InboxDataContext";
 import { useThread } from "@/hooks/useThread";
 import { useOnline } from "@/hooks/useOnline";
 import MediaContent from "@/components/MediaContent";
+import MessageText from "@/components/MessageText";
 import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
 import { canMakeTemplate } from "@/lib/templates";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -1438,14 +1439,13 @@ export default function ConversationScreen() {
                                             <MediaContent media={m.media} />
                                           ) : null}
                                           {m.text ? (
-                                            <p
-                                              className={cn(
-                                                "whitespace-pre-wrap",
-                                                m.media && "mt-1"
-                                              )}
+                                            <MessageText
+                                              className={
+                                                m.media ? "mt-1" : undefined
+                                              }
                                             >
                                               {m.text}
-                                            </p>
+                                            </MessageText>
                                           ) : null}
                                         </div>
                                       ) : null}
@@ -1462,11 +1462,10 @@ export default function ConversationScreen() {
                                         <MediaContent media={m.media} />
                                       ) : null}
                                       {m.text ? (
-                                        <p
-                                          className={cn(
-                                            "whitespace-pre-wrap",
-                                            m.media && "mt-1"
-                                          )}
+                                        <MessageText
+                                          className={
+                                            m.media ? "mt-1" : undefined
+                                          }
                                         >
                                           {m.text}
                                           {m.edited ? (
@@ -1474,7 +1473,7 @@ export default function ConversationScreen() {
                                               (edited)
                                             </span>
                                           ) : null}
-                                        </p>
+                                        </MessageText>
                                       ) : null}
                                       {uncaught ? (
                                         <span className="flex items-center gap-1.5 italic opacity-80">
