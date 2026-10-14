@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { NavPositionSetting } from "@/components/NavPosition";
 import InboxDefaultTabSetting from "@/components/InboxDefaultTabSetting";
 import CountryCodeSetting from "@/components/CountryCodeSetting";
+import InstallAppSetting from "@/components/InstallAppSetting";
 import ScreenHeader from "@/components/ScreenHeader";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -351,6 +352,7 @@ export default function SettingsScreen() {
           <NavPositionSetting />
           <InboxDefaultTabSetting />
           <CountryCodeSetting />
+          <InstallAppSetting />
         </CardContent>
       </Card>
 
