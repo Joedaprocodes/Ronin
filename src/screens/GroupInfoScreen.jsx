@@ -149,7 +149,7 @@ function csvFilename(subject) {
  * the CSV Name column so the address book and the sheet agree.
  */
 function contactName(p) {
-  return (p.name || p.username || "").trim();
+  return "";
 }
 
 /**
