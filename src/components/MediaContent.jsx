@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, Play } from "lucide-react";
 import { mediaUrl } from "@/lib/api";
 import { mediaEmoji, mediaLabel } from "@/lib/media";
+import { useInView } from "@/hooks/useInView";
 
 /**
  * Renders a stored media attachment inside a message bubble.
@@ -12,11 +13,18 @@ import { mediaEmoji, mediaLabel } from "@/lib/media";
  * for messages that actually carry media. A failed load (missing file, dead
  * URL) falls back to an attachment chip so the bubble is never empty.
  *
+ * Bytes are only requested once the attachment scrolls near the viewport: the
+ * browser never sees a `src` for off-screen messages, so opening a media-heavy
+ * thread costs nothing until you actually reach the media. Video/audio add a
+ * second layer with `preload="none"`, so even a visible player fetches only
+ * when played.
+ *
  * @param {object} props
  * @param {import("@/lib/api").MessageMedia} props.media
  */
 export default function MediaContent({ media }) {
   const [failed, setFailed] = useState(false);
+  const [ref, inView] = useInView({ rootMargin: "200px" });
   const src = mediaUrl(media?.url);
 
   if (!media || !src || failed) {
@@ -24,38 +32,56 @@ export default function MediaContent({ media }) {
   }
 
   if (media.type === "sticker") {
-    return (
+    return inView ? (
       <img
         src={src}
         alt={media.fileName || "Sticker"}
         loading="lazy"
+        decoding="async"
         onError={() => setFailed(true)}
         className="size-32 object-contain"
       />
+    ) : (
+      <span ref={ref} aria-hidden className="block size-32 rounded-lg bg-muted" />
     );
   }
 
   if (media.type === "image") {
-    return (
+    return inView ? (
       <img
         src={src}
         alt={media.fileName || "Image"}
         loading="lazy"
+        decoding="async"
         onError={() => setFailed(true)}
         className="max-h-80 w-full rounded-lg object-contain"
+      />
+    ) : (
+      <span
+        ref={ref}
+        aria-hidden
+        className="block h-48 w-64 max-w-full animate-pulse rounded-lg bg-muted"
       />
     );
   }
 
   if (media.type === "video") {
-    return (
+    return inView ? (
       <video
         src={src}
         controls
-        preload="metadata"
+        preload="none"
         onError={() => setFailed(true)}
         className="max-h-80 w-full rounded-lg bg-black/20"
       />
+    ) : (
+      <span
+        ref={ref}
+        aria-hidden
+        className="flex h-48 w-64 max-w-full items-center justify-center rounded-lg bg-black/20 text-muted-foreground"
+      >
+        <Play className="size-8" />
+      </span>
     );
   }
 
@@ -64,7 +90,7 @@ export default function MediaContent({ media }) {
       <audio
         src={src}
         controls
-        preload="metadata"
+        preload="none"
         onError={() => setFailed(true)}
         className="w-64 max-w-full"
       />
