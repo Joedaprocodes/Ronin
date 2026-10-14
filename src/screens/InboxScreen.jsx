@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Flag, Inbox, Loader2, Search, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { senderColor } from "@/lib/senderColor";
 import { mediaEmoji, mediaLabel } from "@/lib/media";
 import { listConversations } from "@/lib/api";
 import { useConversations } from "@/hooks/useConversations";
@@ -50,18 +51,43 @@ function initials(name) {
 
 /** Preview text for the last message, including a media glyph when present. */
 function lastMessageText(message) {
+  // A deleted message must never leak its (still-stored) original content into
+  // the list — show the WhatsApp tombstone instead.
+  if (message.deleted) return "This message was deleted";
   const glyph = message.media ? `${mediaEmoji(message.media.type)} ` : "";
   const body = message.text || (message.media ? mediaLabel(message.media.type) : "");
-  return `${glyph}${body}`.trim();
+  const preview = `${glyph}${body}`.trim();
+  // Mirror the conversation bubble: an unsupported message with no text, media
+  // or quote would otherwise preview as an empty string.
+  if (!preview && !message.quoted) return "Uncaught message";
+  return preview;
 }
 
 function previewOf(conversation) {
   const messages = conversation.messages ?? [];
   const last = messages[messages.length - 1] ?? conversation.lastMessage;
   if (!last) return "";
+  // Group membership notices read verbatim ("Alice added Bob") — no sender
+  // prefix, since the sentence already names everyone involved.
+  if (last.system) return last.text;
+  if (last.deleted) {
+    return last.from === "me"
+      ? "You deleted this message"
+      : "This message was deleted";
+  }
   const content = lastMessageText(last);
   if (last.from === "me") return `You: ${content}`;
-  if (conversation.isGroup && last.sender) return `${last.sender}: ${content}`;
+  if (conversation.isGroup && last.sender) {
+    // Color the sender's name the same way the conversation does.
+    return (
+      <>
+        <span className={cn("font-medium", senderColor(last.sender))}>
+          {last.sender}
+        </span>
+        {`: ${content}`}
+      </>
+    );
+  }
   return content;
 }
 

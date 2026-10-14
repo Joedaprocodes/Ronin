@@ -13,7 +13,7 @@ import { decodeCursor, encodeCursor } from "./cursors";
  * Every helper is best-effort: callers treat failures (private mode, quota,
  * unavailable storage) as a cache miss and fall back to the network.
  */
-const DB_NAME = "whatsapp-pro2";
+const DB_NAME = "ronin";
 const DB_VERSION = 1;
 
 let dbPromise;
@@ -219,6 +219,21 @@ export async function getMeta(key) {
 export async function putMeta(key, value) {
   const db = await getDb();
   await db.put("meta", { key, value });
+}
+
+/**
+ * Delete every cached row (conversations, messages, meta). The database itself
+ * is kept so subsequent reads simply miss until the next refresh repopulates
+ * it. Best-effort, like the rest of this module.
+ * @returns {Promise<number>} how many stores were cleared
+ */
+export async function clearAll() {
+  const db = await getDb();
+  const stores = ["conversations", "messages", "meta"];
+  for (const store of stores) {
+    await db.clear(store);
+  }
+  return stores.length;
 }
 
 /* ------------------------------- Storage --------------------------------- */

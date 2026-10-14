@@ -13,30 +13,19 @@ export default defineConfig({
       // We register the service worker ourselves in main.jsx (via the
       // virtual:pwa-register module) so we can control when it activates.
       injectRegister: null,
-      includeAssets: ['favicon.svg'],
-      manifest: {
-        name: 'WhatsApp Inbox',
-        short_name: 'Inbox',
-        description: 'Offline-first WhatsApp inbox',
-        start_url: '/',
-        display: 'standalone',
-        background_color: '#111b21',
-        theme_color: '#111b21',
-        icons: [
-          {
-            src: '/pwa-192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable',
-          },
-          {
-            src: '/pwa-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable',
-          },
-        ],
-      },
+      // The manifest lives in public/site.webmanifest (the realfavicongenerator
+      // set) and is linked from index.html, so the plugin must not generate a
+      // competing /manifest.webmanifest.
+      manifest: false,
+      includeAssets: [
+        'favicon.svg',
+        'favicon.ico',
+        'favicon-96x96.png',
+        'apple-touch-icon.png',
+        'site.webmanifest',
+        'web-app-manifest-192x192.png',
+        'web-app-manifest-512x512.png',
+      ],
       workbox: {
         // Deep links (e.g. /conversation/:jid) fall back to the SPA shell
         // offline; API routes are never served index.html.

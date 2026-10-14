@@ -6,10 +6,11 @@ import { mediaEmoji, mediaLabel } from "@/lib/media";
 /**
  * Renders a stored media attachment inside a message bubble.
  *
- * The backend only returns a `media` field once it persists media and serves
- * it from GET /api/media/:id; older servers omit it, so this component is only
- * reached for messages that actually carry media. A failed load (missing file,
- * dead URL) falls back to an attachment chip so the bubble is never empty.
+ * The backend only returns a `media` field once it persists media and exposes
+ * it as a URL (the Supabase public URL in production, or GET /api/media/:id for
+ * the on-disk store); older servers omit it, so this component is only reached
+ * for messages that actually carry media. A failed load (missing file, dead
+ * URL) falls back to an attachment chip so the bubble is never empty.
  *
  * @param {object} props
  * @param {import("@/lib/api").MessageMedia} props.media
@@ -20,6 +21,18 @@ export default function MediaContent({ media }) {
 
   if (!media || !src || failed) {
     return <AttachmentChip media={media} />;
+  }
+
+  if (media.type === "sticker") {
+    return (
+      <img
+        src={src}
+        alt={media.fileName || "Sticker"}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="size-32 object-contain"
+      />
+    );
   }
 
   if (media.type === "image") {

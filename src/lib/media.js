@@ -1,4 +1,4 @@
-/** @typedef {"image" | "video" | "audio" | "document"} MediaType */
+/** @typedef {"image" | "video" | "audio" | "document" | "sticker"} MediaType */
 
 // Mirrors the backend cap (~20 MB). Files above this are rejected before upload.
 export const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
@@ -62,6 +62,7 @@ const MEDIA_EMOJI = {
   video: "🎥",
   audio: "🎵",
   document: "📄",
+  sticker: "🧩",
 };
 
 /**
@@ -79,6 +80,7 @@ const MEDIA_LABEL = {
   video: "Video",
   audio: "Audio",
   document: "Document",
+  sticker: "Sticker",
 };
 
 /**

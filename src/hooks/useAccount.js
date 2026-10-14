@@ -4,9 +4,10 @@ import { fetchAccount } from "@/lib/api";
 /**
  * The linked WhatsApp account, as reported by GET /api/account.
  *
- * Read-only (there is no revoke/logout endpoint). Failures — the 503 from a
- * server started without a connection, or a plain network error — degrade to
- * "disconnected" so the UI never crashes; `error` is kept for debugging only.
+ * Read-only: mutations go through disconnectAccount() / requestPairingCode().
+ * Failures — the 503 from a server started without a connection, or a plain
+ * network error — degrade to "disconnected" so the UI never crashes; `error` is
+ * kept for debugging only.
  *
  * Revalidates when the tab becomes visible again, matching the inbox's
  * visibility-refresh behaviour. No polling.

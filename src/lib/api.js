@@ -79,14 +79,64 @@ export async function listConversations(q = "") {
 /**
  * The linked WhatsApp account (who is sending on this server).
  *
- * Read-only: there is no revoke/logout endpoint. Throws on the 503 a server
- * started without a connection returns (apiFetch does that for non-2xx).
+ * Throws on the 503 a server started without a connection returns (apiFetch
+ * does that for non-2xx).
  *
  * @returns {Promise<{ok: boolean, connected: boolean, state: string,
  *   user: {id: string, name: string | null} | null}>}
  */
 export async function fetchAccount() {
   return apiFetch("/api/account");
+}
+
+/** The API token header for account writes (empty object when unset). */
+function accountTokenHeader() {
+  const token = import.meta.env.VITE_API_TOKEN;
+  return token ? { "x-api-token": token } : {};
+}
+
+/**
+ * Unlink the linked WhatsApp device. Logs the session out and wipes the stored
+ * credentials; the server then relinks and advertises a fresh QR / pairing
+ * code. Idempotent — safe to call when already disconnected.
+ *
+ * @returns {Promise<{ok: boolean, connected: boolean, state: string}>}
+ */
+export async function disconnectAccount() {
+  return apiFetch("/api/account/disconnect", {
+    method: "POST",
+    headers: accountTokenHeader(),
+  });
+}
+
+/**
+ * Permanently delete all backend app data: every row (messages, chats,
+ * contacts, lists, templates, broadcasts, guards, automation) plus the stored
+ * media bytes. The linked WhatsApp device stays connected — use
+ * {@link disconnectAccount} to unlink.
+ *
+ * @returns {Promise<{ok: boolean, mediaRemoved: number}>}
+ */
+export async function clearBackendData() {
+  return apiFetch("/api/account/clear-data", {
+    method: "POST",
+    headers: accountTokenHeader(),
+  });
+}
+
+/**
+ * Request an 8-character pairing code (e.g. "ABCD-EFGH") to link a phone.
+ *
+ * @param {string} [phoneNumber] the account's own number, digits with country
+ *   code; falls back to the server's configured `PHONE_NUMBER` when omitted
+ * @returns {Promise<{ok: boolean, code: string, expiresInMs: number}>}
+ */
+export async function requestPairingCode(phoneNumber) {
+  return apiFetch("/api/account/pair", {
+    method: "POST",
+    headers: accountTokenHeader(),
+    body: JSON.stringify(phoneNumber ? { phoneNumber } : {}),
+  });
 }
 
 /**
@@ -132,7 +182,7 @@ export async function fetchThreadPage(jid, { limit, before } = {}) {
 
 /**
  * @typedef {Object} SendMedia
- * @property {"image"|"video"|"audio"|"document"} type
+ * @property {"image"|"video"|"audio"|"document"|"sticker"} type
  * @property {string} data - base64 bytes or a full data: URL
  * @property {string} [mimeType]
  * @property {string} [fileName]
@@ -144,15 +194,44 @@ export async function fetchThreadPage(jid, { limit, before } = {}) {
  * @property {string} [text]
  * @property {string} [email]
  * @property {SendMedia} [media]
+ * @property {string} [quotedId] - id of a stored message in this chat to send
+ *   as a quoted reply
  */
 
 /**
  * A media attachment on a stored message, served by the backend.
  * @typedef {Object} MessageMedia
- * @property {"image"|"video"|"audio"|"document"} type
+ * @property {"image"|"video"|"audio"|"document"|"sticker"} type
  * @property {string} [mimeType]
  * @property {string} [fileName]
  * @property {string} url - path served by GET /api/media/:id
+ */
+
+/**
+ * The message a reply quotes, as shown in the quote block. `media` is the
+ * bucket only (rendered as an icon + label); the bytes are never fetched.
+ * `sender` is present only in group chats ("You" for our own quotes).
+ * @typedef {Object} QuotedMessage
+ * @property {string|null} id - the quoted message's id (jump target)
+ * @property {string} text
+ * @property {{ type: "image"|"video"|"audio"|"document"|"sticker" }} [media]
+ * @property {string} [sender]
+ */
+
+/**
+ * One reaction left on a message.
+ * @typedef {Object} MessageReaction
+ * @property {string} text - the emoji
+ * @property {"me"|"them"} from
+ * @property {string} [sender] - who reacted (only in group chats)
+ */
+
+/**
+ * A group membership notice, rendered as a centered system line.
+ * @typedef {Object} SystemEvent
+ * @property {"add"|"remove"|"promote"|"demote"} action
+ * @property {string} [actor] - the bare jid of whoever made the change
+ * @property {string[]} [participants] - bare jids of the members affected
  */
 
 /**
@@ -164,6 +243,11 @@ export async function fetchThreadPage(jid, { limit, before } = {}) {
  * @property {string} text
  * @property {string} time
  * @property {MessageMedia} [media]
+ * @property {QuotedMessage} [quoted]
+ * @property {boolean} [deleted] - the message was deleted (a tombstone; `text`/`media`/`quoted` are still sent so an admin can reveal them)
+ * @property {boolean} [edited] - the message's text was edited after sending
+ * @property {MessageReaction[]} [reactions] - reactions on this message (absent when there are none)
+ * @property {SystemEvent} [system] - a group membership notice; `text` is the rendered line
  */
 
 /**
@@ -231,6 +315,94 @@ export async function sendMessage(jid, input) {
       status: 0,
       error: err?.message || "Network error",
     };
+  }
+}
+
+/**
+ * Edit one of our own messages (text only). The backend echoes the refreshed
+ * row so the caller can update the bubble in place.
+ *
+ * @param {string} jid
+ * @param {string} id
+ * @param {string} text
+ * @returns {Promise<{ok: boolean, message?: MessageView, status?: number, error?: string}>}
+ */
+export async function editMessage(jid, id, text) {
+  return messageWrite(jid, id, "PUT", { text: text ?? "" });
+}
+
+/**
+ * Delete (revoke) one of our own messages. WhatsApp keeps a tombstone; the
+ * backend returns the updated row so the bubble can switch to it immediately.
+ *
+ * @param {string} jid
+ * @param {string} id
+ * @returns {Promise<{ok: boolean, message?: MessageView, status?: number, error?: string}>}
+ */
+export async function deleteMessage(jid, id) {
+  return messageWrite(jid, id, "DELETE");
+}
+
+/**
+ * Add or clear our reaction on a message. Unlike edit/delete this works on any
+ * (non-deleted) message, matching WhatsApp; an empty `text` removes ours.
+ *
+ * @param {string} jid
+ * @param {string} id
+ * @param {string} text - the emoji; "" (or falsy) clears our reaction
+ * @returns {Promise<{ok: boolean, message?: MessageView, status?: number, error?: string}>}
+ */
+export async function sendReaction(jid, id, text) {
+  return messageWrite(jid, id, "POST", { text: text ?? "" }, "reaction");
+}
+
+/**
+ * Shared PUT/POST/DELETE request for a single message, with the same friendly
+ * error mapping as the other write endpoints.
+ *
+ * @param {string} jid
+ * @param {string} id
+ * @param {"PUT"|"DELETE"|"POST"} method
+ * @param {object} [body]
+ * @param {string} [suffix] - extra path segment ("reaction")
+ * @returns {Promise<{ok: boolean, message?: MessageView, status?: number, error?: string, data?: any}>}
+ */
+async function messageWrite(jid, id, method, body, suffix = "") {
+  const token = import.meta.env.VITE_API_TOKEN;
+  const headers = {
+    ...(body ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { "x-api-token": token } : {}),
+  };
+
+  try {
+    const res = await fetch(
+      `${API_URL}/api/inbox/${encodeURIComponent(jid)}/messages/${encodeURIComponent(id)}${
+        suffix ? `/${suffix}` : ""
+      }`,
+      { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) }
+    );
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) return { ok: true, message: data?.message, data };
+
+    let error = data?.error || `Request failed (${res.status})`;
+    if (res.status === 401) {
+      error = "Not authorized (token missing or wrong)";
+    } else if (res.status === 403) {
+      error = suffix
+        ? "You can't react to this message"
+        : "You can only edit or delete your own messages";
+    } else if (res.status === 404) {
+      error = "This message is no longer available";
+    } else if (res.status === 409) {
+      error = data?.error || "WhatsApp is not connected";
+    } else if (res.status === 400 || res.status === 502) {
+      error = data?.error || error;
+    }
+
+    return { ok: false, status: res.status, error };
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message || "Network error" };
   }
 }
 

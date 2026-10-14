@@ -60,12 +60,31 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
+  /**
+   * Re-verify the signed-in user's password by re-authenticating against
+   * Supabase. Used to confirm sensitive actions (e.g. disconnecting the
+   * WhatsApp account). A wrong password returns an error and does NOT sign the
+   * user out; a correct one refreshes the session (fires SIGNED_IN).
+   *
+   * @param {string} password
+   * @returns {Promise<{error: import("@supabase/supabase-js").AuthError | Error | null}>}
+   */
+  const verifyPassword = async (password) => {
+    if (!user?.email) return { error: new Error("No signed-in account.") }
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password,
+    })
+    return { error }
+  }
+
   const value = {
     session,
     user,
     loading,
     signIn,
     signOut,
+    verifyPassword,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

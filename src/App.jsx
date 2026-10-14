@@ -58,7 +58,7 @@ function Shell() {
       {/* The nav floats over the content; pb-28 keeps the end of each page clear of it */}
       <main className={cn('px-4', showNav ? 'pb-28' : 'pb-4')}>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<Navigate to="/inbox" replace />} />
           <Route path="/login" element={<LoginScreen />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/inbox" element={<InboxScreen />} />
