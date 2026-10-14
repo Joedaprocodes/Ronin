@@ -58,8 +58,9 @@ function lastMessageText(message) {
   const body = message.text || (message.media ? mediaLabel(message.media.type) : "");
   const preview = `${glyph}${body}`.trim();
   // Mirror the conversation bubble: an unsupported message with no text, media
-  // or quote would otherwise preview as an empty string.
-  if (!preview && !message.quoted) return "Uncaught message";
+  // or quote would otherwise preview as an empty string. Edited messages are
+  // excluded so they show "(edited)" in the conversation bubble instead.
+  if (!preview && !message.quoted && !message.edited) return "Uncaught message";
   return preview;
 }
 
