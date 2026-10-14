@@ -15,8 +15,19 @@ export const AI_SETTINGS_KEY = "ai-settings";
 /** Where a key can be minted. */
 export const GEMINI_KEY_URL = "https://aistudio.google.com/apikey";
 
-/** Current stable Flash model: fast, cheap and good at conversational tone. */
-export const DEFAULT_MODEL = "gemini-3.8-flash";
+/**
+ * The default model, used until someone types their own in Settings. Flash Lite
+ * is the cheapest, fastest tier and is plenty for short reply drafts.
+ */
+export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+
+/**
+ * Model ids this project previously shipped as the default. A device that saved
+ * settings before the default changed kept the old id in localStorage without
+ * ever choosing it, so these map to the current default on load. Any other
+ * stored model is treated as a deliberate choice and left alone.
+ */
+const RETIRED_DEFAULT_MODELS = ["gemini-3.8-flash"];
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -128,11 +139,14 @@ export function loadAiSettings() {
     if (!parsed || typeof parsed !== "object") {
       return { ...DEFAULT_AI_SETTINGS };
     }
-    const model = typeof parsed.model === "string" ? parsed.model.trim() : "";
+    const stored = typeof parsed.model === "string" ? parsed.model.trim() : "";
     return {
       enabled: parsed.enabled !== false,
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
-      model: model || DEFAULT_MODEL,
+      model:
+        stored && !RETIRED_DEFAULT_MODELS.includes(stored)
+          ? stored
+          : DEFAULT_MODEL,
     };
   } catch {
     return { ...DEFAULT_AI_SETTINGS };
