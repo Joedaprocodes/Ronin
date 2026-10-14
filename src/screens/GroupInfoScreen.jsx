@@ -160,13 +160,14 @@ function contactName(p) {
 function contactRows(participants) {
   // Deduplicate by phone number to avoid adding the same contact twice
   const seenPhones = new Set();
-  return (participants ?? [])
-    .filter((p) => p.phone && !seenPhones.has(p.phone))
-    .forEach((p) => seenPhones.add(p.phone))
-    .map((p) => ({ name: contactName(p), phone: p.phone }));
-  return (participants ?? [])
-    .filter((p) => p.phone)
-    .map((p) => ({ name: contactName(p), phone: p.phone }));
+  const unique = [];
+  for (const p of participants ?? []) {
+    if (p.phone && !seenPhones.has(p.phone)) {
+      seenPhones.add(p.phone);
+      unique.push(p);
+    }
+  }
+  return unique.map((p) => ({ name: contactName(p), phone: p.phone }));
 }
 
 /** Friendly text for the statuses the group endpoint can return. */
