@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowUpIcon,
+  BookmarkPlus,
   Check,
   CornerUpLeft,
   Copy,
@@ -40,6 +41,8 @@ import { useInboxData } from "@/context/InboxDataContext";
 import { useThread } from "@/hooks/useThread";
 import { useOnline } from "@/hooks/useOnline";
 import MediaContent from "@/components/MediaContent";
+import SaveAsTemplateDialog from "@/components/SaveAsTemplateDialog";
+import { canMakeTemplate } from "@/lib/templates";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   AlertDialog,
@@ -346,27 +349,31 @@ function QuotedMessage({ quoted, own }) {
 /**
  * The "…" menu beside a message bubble. Rendered next to (not inside) the
  * bubble; it fades in on hover / keyboard focus and stays visible on touch.
- * Every non-deleted message gets Reply (plus Copy when it has text); Edit and
- * Delete only appear on our own messages.
+ * Every non-deleted message gets Reply (plus Copy and Make template once it has
+ * content); Edit and Delete only appear on our own messages.
  *
  * @param {{
  *   mine: boolean,
  *   canEdit: boolean,
  *   canCopy: boolean,
+ *   canTemplate: boolean,
  *   onReply: () => void,
  *   onCopy: () => void,
  *   onEdit: () => void,
  *   onDelete: () => void,
+ *   onMakeTemplate: () => void,
  * }} props
  */
 function MessageActions({
   mine,
   canEdit,
   canCopy,
+  canTemplate,
   onReply,
   onCopy,
   onEdit,
   onDelete,
+  onMakeTemplate,
 }) {
   return (
     <DropdownMenu>
@@ -391,6 +398,12 @@ function MessageActions({
           <DropdownMenuItem onClick={onCopy}>
             <Copy className="size-4" />
             Copy
+          </DropdownMenuItem>
+        ) : null}
+        {canTemplate ? (
+          <DropdownMenuItem onClick={onMakeTemplate}>
+            <BookmarkPlus className="size-4" />
+            Make template
           </DropdownMenuItem>
         ) : null}
         {canEdit ? (
@@ -767,11 +780,18 @@ export default function ConversationScreen() {
   // The cold `copiedId` powers the brief "Copied" confirmation.
   const [reply, setReply] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  // "Make template": the message the dialog is copying, a nonce that remounts
+  // the dialog on every open (so it re-seeds from that message), and the chip
+  // shown above the composer once a template is saved.
+  const [templateTarget, setTemplateTarget] = useState(null);
+  const [templateNonce, setTemplateNonce] = useState(0);
+  const [templateSaved, setTemplateSaved] = useState(false);
   const fileInputRef = useRef(null);
   const stickerInputRef = useRef(null);
   const composerRef = useRef(null);
   const topRef = useRef(null);
   const copyTimer = useRef(null);
+  const templateTimer = useRef(null);
 
   const replyTarget = reply?.jid === jid ? reply.message : null;
   const replyDeleted = Boolean(
@@ -806,7 +826,13 @@ export default function ConversationScreen() {
     if (jid && visible && conversationUnread > 0) markRead(jid);
   }, [jid, visible, conversationUnread, markRead]);
 
-  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(copyTimer.current);
+      clearTimeout(templateTimer.current);
+    },
+    []
+  );
 
   // The AI switch lives in Settings, possibly in another tab: re-read it when
   // this tab regains focus so the sparkle button appears/disappears with it.
@@ -1027,6 +1053,29 @@ export default function ConversationScreen() {
     setEditTarget(null);
     setEditDraft("");
     setActionError("");
+  }
+
+  /**
+   * Open the "Save as template" dialog for a message. The nonce remounts the
+   * dialog, so it re-seeds its fields from this message on every open.
+   *
+   * @param {ConversationMessage} message
+   */
+  function openTemplate(message) {
+    setTemplateNonce((n) => n + 1);
+    setTemplateTarget(message);
+  }
+
+  function closeTemplate() {
+    setTemplateTarget(null);
+  }
+
+  /** Called by the dialog once the template exists: swap to the confirmation. */
+  function handleTemplateSaved() {
+    setTemplateTarget(null);
+    setTemplateSaved(true);
+    clearTimeout(templateTimer.current);
+    templateTimer.current = setTimeout(() => setTemplateSaved(false), 6000);
   }
 
   function openDelete(message) {
@@ -1455,10 +1504,12 @@ export default function ConversationScreen() {
                                           mine={mine}
                                           canEdit={editable}
                                           canCopy={Boolean(m.text)}
+                                          canTemplate={canMakeTemplate(m)}
                                           onReply={() => openReply(m)}
                                           onCopy={() => copyText(m)}
                                           onEdit={() => openEdit(m)}
                                           onDelete={() => openDelete(m)}
+                                          onMakeTemplate={() => openTemplate(m)}
                                         />
                                       </div>
                                     </div>
@@ -1512,6 +1563,22 @@ export default function ConversationScreen() {
               >
                 <Check className="size-3.5" />
                 Copied to clipboard
+              </p>
+            ) : null}
+
+            {templateSaved ? (
+              <p
+                role="status"
+                className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <Check className="size-3.5" />
+                Saved to templates
+                <Link
+                  to="/broadcasts?tab=templates"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  View templates
+                </Link>
               </p>
             ) : null}
 
@@ -1759,6 +1826,21 @@ export default function ConversationScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/*
+        Save as template. Keyed by open-count so it remounts (and re-seeds its
+        title/body from the message) each time the menu item is tapped.
+      */}
+      <SaveAsTemplateDialog
+        key={templateNonce}
+        open={Boolean(templateTarget)}
+        onOpenChange={(open) => {
+          if (!open) closeTemplate();
+        }}
+        message={templateTarget}
+        contactName={conversation?.name ?? ""}
+        onSaved={handleTemplateSaved}
+      />
     </div>
   );
 }
