@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Download, Loader2, MessageSquare, Users, WifiOff } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  Check,
+  Download,
+  Loader2,
+  MessageSquare,
+  UserPlus,
+  Users,
+  WifiOff,
+} from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +21,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import ScreenHeader from "@/components/ScreenHeader";
-import { getGroupInfo } from "@/lib/api";
+import { getGroupInfo, getList, listContacts } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { useContactsData } from "@/context/ContactsDataContext";
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
@@ -134,6 +143,26 @@ function csvFilename(subject) {
   return `${slug || "group"}-participants-${date}.csv`;
 }
 
+/**
+ * The name stored on a new contact: the resolved display name, then the
+ * participant's @username, else blank (the number identifies the row). Mirrors
+ * the CSV Name column so the address book and the sheet agree.
+ */
+function contactName(p) {
+  return (p.name || p.username || "").trim();
+}
+
+/**
+ * Import rows for the participants we can actually store as contacts: those
+ * whose phone number WhatsApp resolved (LID-only members have none and are
+ * skipped — a contact needs a real number).
+ */
+function contactRows(participants) {
+  return (participants ?? [])
+    .filter((p) => p.phone)
+    .map((p) => ({ name: contactName(p), phone: p.phone }));
+}
+
 /** Friendly text for the statuses the group endpoint can return. */
 function describeError(err) {
   switch (err?.status) {
@@ -162,11 +191,15 @@ function describeError(err) {
 export default function GroupInfoScreen() {
   const { jid } = useParams();
   const navigate = useNavigate();
+  const { lists, importContacts, createList, updateList } = useContactsData();
 
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [addingToList, setAddingToList] = useState(false);
+  const [listResult, setListResult] = useState(null);
+  const [listError, setListError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +246,72 @@ export default function GroupInfoScreen() {
   /** Download the currently listed participants as a CSV file. */
   function exportParticipants() {
     downloadCsv(csvFilename(group?.name), toCsv(csvRows(participants, group)));
+  }
+
+  /**
+   * Saves every participant that has a resolved number into the address book,
+   * then puts them all into a broadcast list titled after the group. A list
+   * with that name already (e.g. one you pre-created) is reused and its
+   * members are kept; otherwise a new list is created.
+   */
+  async function addParticipantsToList() {
+    if (!group || addingToList) return;
+    setListError("");
+    setListResult(null);
+
+    const rows = contactRows(participants);
+    if (!rows.length) {
+      setListError("No participant numbers to add.");
+      return;
+    }
+
+    setAddingToList(true);
+    try {
+      await importContacts(rows);
+      // Resolve each number to its stored contact id (existing or just added).
+      const stored = await listContacts();
+      const idByPhone = new Map(stored.map((c) => [c.phone, c.id]));
+      const ids = [
+        ...new Set(
+          rows
+            .map((r) => idByPhone.get(`+${String(r.phone).replace(/\D/g, "")}`))
+            .filter(Boolean)
+        ),
+      ];
+
+      const name = group.name?.trim() || "Group participants";
+      const existing = lists.find(
+        (l) => l.name.trim().toLowerCase() === name.toLowerCase()
+      );
+
+      let saved;
+      if (existing) {
+        const detail = await getList(existing.id);
+        const merged = [...new Set([...(detail?.contactIds ?? []), ...ids])];
+        saved = await updateList(existing.id, {
+          name: existing.name,
+          description: existing.description ?? "",
+          contactIds: merged,
+        });
+      } else {
+        saved = await createList({
+          name,
+          description: `Members of ${name}`,
+          contactIds: ids,
+        });
+      }
+
+      setListResult({
+        id: saved?.id ?? existing?.id ?? null,
+        name: saved?.name ?? name,
+        count: ids.length,
+        created: !existing,
+      });
+    } catch (err) {
+      setListError(err?.message || "Couldn't add participants to a list.");
+    } finally {
+      setAddingToList(false);
+    }
   }
 
   const created = createdLabel(group?.createdAt);
@@ -332,7 +431,20 @@ export default function GroupInfoScreen() {
                 {count} {count === 1 ? "member" : "members"}
               </CardDescription>
               {participants.length > 0 ? (
-                <CardAction>
+                <CardAction className="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={addParticipantsToList}
+                    disabled={addingToList}
+                  >
+                    {addingToList ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="size-4" />
+                    )}
+                    {addingToList ? "Adding…" : "Add to list"}
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -346,6 +458,34 @@ export default function GroupInfoScreen() {
             </CardHeader>
 
             <CardContent>
+              {listError ? (
+                <p role="alert" className="mb-3 text-xs text-destructive">
+                  {listError}
+                </p>
+              ) : null}
+
+              {listResult ? (
+                <p
+                  role="status"
+                  className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+                >
+                  <Check className="size-3.5" />
+                  {`Added ${listResult.count} ${
+                    listResult.count === 1 ? "participant" : "participants"
+                  } to ${
+                    listResult.created ? "the new list " : ""
+                  }“${listResult.name}”`}
+                  {listResult.id ? (
+                    <Link
+                      to={`/contacts/lists/${listResult.id}`}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      View list
+                    </Link>
+                  ) : null}
+                </p>
+              ) : null}
+
               {participants.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-3 py-8 text-center">
                   <Users className="size-5 text-muted-foreground" />
