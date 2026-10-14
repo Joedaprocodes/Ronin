@@ -158,6 +158,12 @@ function contactName(p) {
  * skipped — a contact needs a real number).
  */
 function contactRows(participants) {
+  // Deduplicate by phone number to avoid adding the same contact twice
+  const seenPhones = new Set();
+  return (participants ?? [])
+    .filter((p) => p.phone && !seenPhones.has(p.phone))
+    .forEach((p) => seenPhones.add(p.phone))
+    .map((p) => ({ name: contactName(p), phone: p.phone }));
   return (participants ?? [])
     .filter((p) => p.phone)
     .map((p) => ({ name: contactName(p), phone: p.phone }));
