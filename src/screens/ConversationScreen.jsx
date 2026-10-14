@@ -274,9 +274,72 @@ function canEditMessage(m) {
   return Number.isFinite(t) && Date.now() - t <= EDIT_WINDOW_MS;
 }
 
+/** All versions of an edited message: previous edits + current text. */
+function getMessageVersions(m) {
+  if (!m) return [];
+  const history = Array.isArray(m.edits)
+    ? m.edits
+        .map((e) => (typeof e === "string" ? e : e?.text))
+        .filter((t) => t != null)
+    : [];
+  if (m.text != null) {
+    return [...history, m.text];
+  }
+  return history;
+}
+
 /** Whether a deleted message kept content we can let an admin reveal. */
 function hasHiddenContent(m) {
-  return Boolean(m?.text || m?.media || m?.quoted);
+  return Boolean(
+    m?.text ||
+      m?.media ||
+      m?.quoted ||
+      (Array.isArray(m?.edits) && m.edits.length > 0)
+  );
+}
+
+/**
+ * Interactive version stepper for edited messages: < 1/2 > ... < 2/2 >.
+ * Clicking < or > steps through the previous versions saved in edit history.
+ */
+function EditStepper({ total, current, onChange }) {
+  if (total <= 1) return null;
+  return (
+    <span
+      className="ml-1.5 inline-flex select-none items-center gap-0.5 align-baseline font-medium text-[10px] opacity-75"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        disabled={current <= 0}
+        onClick={(e) => {
+          e.stopPropagation();
+          onChange(current - 1);
+        }}
+        className="inline-flex size-3.5 items-center justify-center rounded font-mono transition-colors hover:bg-black/15 disabled:pointer-events-none disabled:opacity-30 dark:hover:bg-white/15"
+        aria-label="Previous version"
+        title="Previous version"
+      >
+        &lt;
+      </button>
+      <span className="tabular-nums">
+        {current + 1}/{total}
+      </span>
+      <button
+        type="button"
+        disabled={current >= total - 1}
+        onClick={(e) => {
+          e.stopPropagation();
+          onChange(current + 1);
+        }}
+        className="inline-flex size-3.5 items-center justify-center rounded font-mono transition-colors hover:bg-black/15 disabled:pointer-events-none disabled:opacity-30 dark:hover:bg-white/15"
+        aria-label="Next version"
+        title="Next version"
+      >
+        &gt;
+      </button>
+    </span>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -776,6 +839,12 @@ export default function ConversationScreen() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [revealedIds, setRevealedIds] = useState(() => new Set());
+  // Per-message version viewing index for messages with edit history.
+  const [viewingVersions, setViewingVersions] = useState({});
+
+  function setMsgVersion(msgId, nextIndex) {
+    setViewingVersions((prev) => ({ ...prev, [msgId]: nextIndex }));
+  }
   // Reply (quoted send). Stored with the thread it belongs to so switching
   // threads (or the message being deleted) simply drops it — no effect needed.
   // The cold `copiedId` powers the brief "Copied" confirmation.
@@ -1349,10 +1418,23 @@ export default function ConversationScreen() {
                         const editable = canEditMessage(m);
                         const revealed = revealedIds.has(m.id);
                         const mine = m.from === "me";
+                        const versions = getMessageVersions(m);
+                        const totalVersions = versions.length;
+                        const currentVersionIndex =
+                          viewingVersions[m.id] ??
+                          (totalVersions > 0 ? totalVersions - 1 : 0);
+                        const displayedText =
+                          totalVersions > 0
+                            ? versions[currentVersionIndex]
+                            : (m.text ?? "");
                         // A message the backend couldn't turn into text, media or a
                         // quote (an unsupported WhatsApp type). Render a placeholder
                         // instead of an empty bubble, echoing the deleted tombstone.
-                        const uncaught = !m.text && !m.media && !m.quoted;
+                        const uncaught =
+                          !m.text &&
+                          !m.media &&
+                          !m.quoted &&
+                          totalVersions === 0;
 
                         return (
                           <Fragment key={m.id}>
@@ -1438,13 +1520,26 @@ export default function ConversationScreen() {
                                           {m.media ? (
                                             <MediaContent media={m.media} />
                                           ) : null}
-                                          {m.text ? (
+                                          {displayedText ? (
                                             <MessageText
                                               className={
                                                 m.media ? "mt-1" : undefined
                                               }
                                             >
-                                              {m.text}
+                                              {displayedText}
+                                              {totalVersions > 1 ? (
+                                                <EditStepper
+                                                  total={totalVersions}
+                                                  current={currentVersionIndex}
+                                                  onChange={(next) =>
+                                                    setMsgVersion(m.id, next)
+                                                  }
+                                                />
+                                              ) : m.edited ? (
+                                                <span className="ml-1.5 align-baseline text-[10px] opacity-70">
+                                                  (edited)
+                                                </span>
+                                              ) : null}
                                             </MessageText>
                                           ) : null}
                                         </div>
@@ -1461,14 +1556,22 @@ export default function ConversationScreen() {
                                       {m.media ? (
                                         <MediaContent media={m.media} />
                                       ) : null}
-                                      {m.text ? (
+                                      {displayedText ? (
                                         <MessageText
                                           className={
                                             m.media ? "mt-1" : undefined
                                           }
                                         >
-                                          {m.text}
-                                          {m.edited ? (
+                                          {displayedText}
+                                          {totalVersions > 1 ? (
+                                            <EditStepper
+                                              total={totalVersions}
+                                              current={currentVersionIndex}
+                                              onChange={(next) =>
+                                                setMsgVersion(m.id, next)
+                                              }
+                                            />
+                                          ) : m.edited ? (
                                             <span className="ml-1.5 align-baseline text-[10px] opacity-70">
                                               (edited)
                                             </span>
@@ -1502,10 +1605,10 @@ export default function ConversationScreen() {
                                         <MessageActions
                                           mine={mine}
                                           canEdit={editable}
-                                          canCopy={Boolean(m.text)}
+                                          canCopy={Boolean(displayedText || m.text)}
                                           canTemplate={canMakeTemplate(m)}
                                           onReply={() => openReply(m)}
-                                          onCopy={() => copyText(m)}
+                                          onCopy={() => copyText({ ...m, text: displayedText })}
                                           onEdit={() => openEdit(m)}
                                           onDelete={() => openDelete(m)}
                                           onMakeTemplate={() => openTemplate(m)}
