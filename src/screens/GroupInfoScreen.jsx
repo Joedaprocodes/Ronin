@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Download, Loader2, MessageSquare, Users } from "lucide-react";
+import { Download, Loader2, MessageSquare, Users, WifiOff } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,20 @@ import { downloadCsv, toCsv } from "@/lib/csv";
 
 // Created once: the locale is resolved by Intl, not hand-rolled.
 const CREATED_FMT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const FETCHED_FMT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/**
+ * A readable "last synced" label from the backend's `fetchedAt` (ISO-8601), or
+ * null when there is no usable timestamp.
+ */
+function fetchedLabel(iso) {
+  if (!iso) return null;
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? null : FETCHED_FMT.format(at);
+}
 
 /** First letters of the first two words, e.g. "Ada Lovelace" -> "AL". */
 function initials(name) {
@@ -211,6 +225,9 @@ export default function GroupInfoScreen() {
       ].filter(Boolean)
     : [];
   const hasMeta = Boolean(created || ephemeral || flags.length);
+  // Set when the backend served its stored snapshot instead of a live read
+  // (socket offline, or a refresh failed) — worth telling the user about.
+  const lastSynced = group ? fetchedLabel(group.fetchedAt) : null;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 py-4">
@@ -252,6 +269,20 @@ export default function GroupInfoScreen() {
         </div>
       ) : !group ? null : (
         <>
+          {group.stale ? (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-xl border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            >
+              <WifiOff className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                {lastSynced
+                  ? `Showing saved group info from ${lastSynced}. WhatsApp isn't connected right now.`
+                  : "Showing saved group info. WhatsApp isn't connected right now."}
+              </span>
+            </div>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>About</CardTitle>

@@ -848,8 +848,10 @@ export async function getBroadcast(id) {
  */
 
 /**
- * A group's live metadata. `participants` is [] when the backend can't list
- * them (display rule: name ?? username ?? phone ?? id).
+ * A group's metadata, served from the backend's persisted snapshot. While
+ * WhatsApp is connected the snapshot is kept current from socket events, so it
+ * is normally fresh; `participants` is [] when the backend can't list them
+ * (display rule: name ?? username ?? phone ?? id).
  * @typedef {Object} GroupInfo
  * @property {string} jid
  * @property {string | null} name - group subject
@@ -863,14 +865,20 @@ export async function getBroadcast(id) {
  * @property {boolean} isCommunity
  * @property {number | null} ephemeralDuration - disappearing messages (seconds)
  * @property {GroupParticipant[]} participants
+ * @property {boolean} [stale] - true when served offline/after a failed refresh
+ * @property {string | null} [fetchedAt] - ISO-8601 of the last live snapshot
  */
 
 /**
- * Fetch a group's live metadata from WhatsApp.
+ * Fetch a group's metadata from the backend snapshot.
  *
  * Throws (the Error carries `.status`) so the screen can branch:
  *   503 no WhatsApp connection configured, 409 socket not connected,
  *   404 group not found, 502 metadata could not be read.
+ *
+ * The response may carry `stale: true` with a `fetchedAt` timestamp when the
+ * socket is offline (or a live refresh failed) and the backend served its last
+ * stored snapshot instead.
  *
  * @param {string} jid
  * @returns {Promise<GroupInfo | null>}
