@@ -187,7 +187,6 @@ export default function AutomationScreen() {
                     <TabsList className="w-full mb-3">
                         <TabsTrigger value="replies">Auto-replies</TabsTrigger>
                         <TabsTrigger value="away">Away mode</TabsTrigger>
-                        <TabsTrigger value="connection">Connection</TabsTrigger>
                     </TabsList>
                 </ScreenHeader>
 
@@ -206,9 +205,6 @@ export default function AutomationScreen() {
                         templatesError={templatesError}
                         onRetryTemplates={retryTemplates}
                     />
-                </TabsContent>
-                <TabsContent value="connection" className="mt-4 space-y-4">
-                    <Connection />
                 </TabsContent>
             </Tabs>
         </div>
