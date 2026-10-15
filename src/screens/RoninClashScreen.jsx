@@ -290,11 +290,11 @@ export default function RoninClashScreen() {
                   <dd className="font-medium">
                     {saved.startAt
                       ? new Date(saved.startAt).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
                       : "—"}
                   </dd>
                 </div>
@@ -402,11 +402,15 @@ export default function RoninClashScreen() {
                       <SelectValue placeholder="Select a group" />
                     </SelectTrigger>
                     <SelectContent>
-                      {groups.map((g) => (
-                        <SelectItem key={g.jid} value={g.jid}>
-                          {groupLabel(g)}
-                        </SelectItem>
-                      ))}
+                      {[...groups]
+                        .sort((a, b) =>
+                          groupLabel(a).localeCompare(groupLabel(b), undefined, { sensitivity: "base" })
+                        )
+                        .map((g) => (
+                          <SelectItem key={g.jid} value={g.jid}>
+                            {groupLabel(g)}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 )}
