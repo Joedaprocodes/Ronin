@@ -529,7 +529,7 @@ function GameCard({ game, groupName, onDelete, onSaved }) {
         </div>
       </CardHeader>
       {game.status === "running" && (
-        <CardFooter className="pt-0 border-t bg-muted/30">
+        <CardFooter className="border-t bg-muted/30">
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-muted-foreground">
               {manualLive ? (
