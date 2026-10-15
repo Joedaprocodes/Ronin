@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import ScreenHeader from "@/components/ScreenHeader";
 import { createGame, listGameGroups } from "@/lib/api";
 import { parseQuestionsFile } from "@/lib/gameQuestions";
@@ -89,7 +90,16 @@ export default function RoninClashScreen() {
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
   const [minDelay, setMinDelay] = useState("8");
-  const [maxDelay, setMaxDelay] = useState("25");
+  const [maxDelay, setMaxDelay] = useState("15");
+  // Question flow: timing override, pause, advance mode, group→DM delay and
+  // what the DM poll names show. The question-time override sits behind its
+  // own toggle so it only shows (and applies) when switched on.
+  const [questionTimeEnabled, setQuestionTimeEnabled] = useState(false);
+  const [questionTime, setQuestionTime] = useState("30");
+  const [betweenQuestions, setBetweenQuestions] = useState("30");
+  const [advanceMode, setAdvanceMode] = useState("auto");
+  const [groupToDmDelay, setGroupToDmDelay] = useState("5");
+  const [dmVisibility, setDmVisibility] = useState("shown");
 
   const [fileName, setFileName] = useState("");
   const [questions, setQuestions] = useState([]);
@@ -147,6 +157,23 @@ export default function RoninClashScreen() {
     maxNum <= MAX_DELAY_SECONDS;
   const delayRisky = delaysValid && minNum < RISKY_DELAY_SECONDS;
 
+  // Question-flow timings: whole seconds, same hard cap as the batch delays.
+  // The override only validates (and applies) while its toggle is on.
+  const questionTimeValid =
+    !questionTimeEnabled ||
+    (questionTime !== "" &&
+      Number.isInteger(Number(questionTime)) &&
+      Number(questionTime) >= 1 &&
+      Number(questionTime) <= MAX_DELAY_SECONDS);
+  const wholeSeconds = (value, min) =>
+    value !== "" &&
+    Number.isInteger(Number(value)) &&
+    Number(value) >= min &&
+    Number(value) <= MAX_DELAY_SECONDS;
+  const betweenValid = advanceMode !== "auto" || wholeSeconds(betweenQuestions, 0);
+  const groupToDmValid = wholeSeconds(groupToDmDelay, 0);
+  const flowValid = questionTimeValid && betweenValid && groupToDmValid;
+
   const cleanSheet = questions.length > 0 && rowErrors.length === 0 && !parseError;
 
   const missing = [];
@@ -156,6 +183,7 @@ export default function RoninClashScreen() {
   if (!startValid) missing.push("a valid start time");
   if (!cleanSheet) missing.push("a clean spreadsheet");
   if (!delaysValid) missing.push("valid delays (min ≤ max)");
+  if (!flowValid) missing.push("valid question-flow timings");
 
   const canConfirm = missing.length === 0 && !submitting;
   /** Parses + validates the uploaded workbook; errors block confirming. */
@@ -208,6 +236,16 @@ export default function RoninClashScreen() {
       startAt: startAt.toISOString(),
       minDelaySeconds: minNum,
       maxDelaySeconds: maxNum,
+      questionTimeSeconds:
+        questionTimeEnabled && questionTime !== "" ? Number(questionTime) : null,
+      // The pause only applies to auto mode; omitted while manual so the
+      // stored/default pause is untouched by the hidden field.
+      ...(advanceMode === "auto"
+        ? { betweenQuestionsSeconds: Number(betweenQuestions) }
+        : {}),
+      advanceMode,
+      groupToDmDelaySeconds: Number(groupToDmDelay),
+      dmQuestionVisibility: dmVisibility,
       questions,
     });
     setSubmitting(false);
@@ -264,6 +302,17 @@ export default function RoninClashScreen() {
                   <dt className="text-muted-foreground">Batch delay</dt>
                   <dd className="font-medium">
                     {saved.minDelaySeconds}–{saved.maxDelaySeconds}s
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <dt className="text-muted-foreground">Question flow</dt>
+                  <dd className="font-medium">
+                    {saved.questionTimeSeconds
+                      ? `${saved.questionTimeSeconds}s questions`
+                      : "Sheet times"}
+                    {" · "}
+                    {saved.groupToDmDelaySeconds}s group→DM ·{" "}
+                    {saved.advanceMode === "manual" ? "manual .next" : "auto"}
                   </dd>
                 </div>
               </dl>
@@ -544,6 +593,133 @@ export default function RoninClashScreen() {
               )}
             </CardContent>
           </Card>
+          {/* Question flow ------------------------------------------------ */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Question flow</CardTitle>
+              <CardDescription>
+                How questions are timed and handed from the group to players&apos; DMs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <Label htmlFor="game-qtime-toggle" className="flex-1 cursor-pointer">
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">Override question time</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Use one time limit for every question instead of each row&apos;s
+                        &quot;Time limit (sec)&quot;.
+                      </span>
+                    </span>
+                  </Label>
+                  <Switch
+                    id="game-qtime-toggle"
+                    checked={questionTimeEnabled}
+                    onCheckedChange={setQuestionTimeEnabled}
+                  />
+                </div>
+                {questionTimeEnabled && (
+                  <div className="space-y-2">
+                    <Label htmlFor="game-qtime">Question time (sec)</Label>
+                    <Input
+                      id="game-qtime"
+                      type="number"
+                      min={1}
+                      max={MAX_DELAY_SECONDS}
+                      value={questionTime}
+                      onChange={(e) => setQuestionTime(e.target.value)}
+                      placeholder="e.g. 30"
+                    />
+                    {!questionTimeValid && (
+                      <p className="text-xs text-destructive">
+                        Use a whole number between 1 and {MAX_DELAY_SECONDS}.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <Label htmlFor="game-manual" className="flex-1 cursor-pointer">
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium">Manual advance (.next)</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Off (auto): the next question starts after the pause below. On: the
+                      game waits for the host or a group admin to send{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                        .next
+                      </code>{" "}
+                      and the pause setting stays hidden.
+                    </span>
+                  </span>
+                </Label>
+                <Switch
+                  id="game-manual"
+                  checked={advanceMode === "manual"}
+                  onCheckedChange={(v) => setAdvanceMode(v ? "manual" : "auto")}
+                />
+              </div>
+
+              <div className={advanceMode === "auto" ? "grid grid-cols-2 gap-3" : ""}>
+                {advanceMode === "auto" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="game-between">Pause between questions (sec)</Label>
+                    <Input
+                      id="game-between"
+                      type="number"
+                      min={0}
+                      max={MAX_DELAY_SECONDS}
+                      value={betweenQuestions}
+                      onChange={(e) => setBetweenQuestions(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="game-g2d">Group text → DM delay (sec)</Label>
+                  <Input
+                    id="game-g2d"
+                    type="number"
+                    min={0}
+                    max={MAX_DELAY_SECONDS}
+                    value={groupToDmDelay}
+                    onChange={(e) => setGroupToDmDelay(e.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Each question is posted to the group first; the answer polls arrive in
+                DMs after the group→DM delay. The pause between questions runs after each
+                leaderboard and only applies while auto is on.
+              </p>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <Label htmlFor="game-dmwords" className="flex-1 cursor-pointer">
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">
+                        Show question wording in DM polls
+                      </span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Off: DM polls show only the number (Q1, Q2…). The group always
+                        sees the full question either way.
+                      </span>
+                    </span>
+                  </Label>
+                  <Switch
+                    id="game-dmwords"
+                    checked={dmVisibility === "shown"}
+                    onCheckedChange={(v) => setDmVisibility(v ? "shown" : "hidden")}
+                  />
+                </div>
+              </div>
+              {!flowValid && (
+                <p className="text-xs text-destructive">
+                  Pauses must be whole seconds between 0 and {MAX_DELAY_SECONDS}.
+                </p>
+              )}
+            </CardContent>
+          </Card>
           {/* Review -------------------------------------------------------- */}
           <Card>
             <CardHeader className="pb-3">
@@ -580,6 +756,36 @@ export default function RoninClashScreen() {
                   <dt className="text-muted-foreground">Batch delay</dt>
                   <dd className="font-medium">
                     {delaysValid ? `${minNum}–${maxNum}s` : "—"}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <dt className="text-muted-foreground">Question time</dt>
+                  <dd className="font-medium">
+                    {!questionTimeEnabled
+                      ? "From sheet"
+                      : questionTime === ""
+                        ? "—"
+                        : `${questionTime}s`}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <dt className="text-muted-foreground">Question flow</dt>
+                  <dd className="font-medium">
+                    {flowValid
+                      ? `${advanceMode === "auto" ? `${betweenQuestions}s pause · ` : ""}${groupToDmDelay}s group→DM`
+                      : "—"}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <dt className="text-muted-foreground">Advance</dt>
+                  <dd className="font-medium">
+                    {advanceMode === "manual" ? "Manual (.next)" : "Auto"}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <dt className="text-muted-foreground">DM poll wording</dt>
+                  <dd className="font-medium">
+                    {dmVisibility === "hidden" ? "Number only" : "Question shown"}
                   </dd>
                 </div>
               </dl>

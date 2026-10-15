@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Gamepad2, Loader2, Plus, Trash2, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Gamepad2,
+  Loader2,
+  Pencil,
+  Plus,
+  Settings2,
+  SkipForward,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,9 +22,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import ScreenHeader from "@/components/ScreenHeader";
-import { listGames, cancelGame, listGameGroups } from "@/lib/api";
+import { listGames, cancelGame, listGameGroups, updateGame } from "@/lib/api";
 import { useInboxEventsListener } from "@/context/InboxEventsContext";
 
 const STATUS_VARIANT = {
@@ -149,13 +170,13 @@ export default function GameScreen() {
               <div className="min-w-0 flex-1">
                 <CardTitle>RoninClash</CardTitle>
                 <CardDescription>
-                  Group trivia: players join with a poll, answer each question as a
+                  Kahoot like Group trivia : players join with a poll, answer each question as a
                   private DM poll, and score points for speed and accuracy.
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardFooter className="pt-0">
+          <CardFooter className="">
             {/* Visual CTA only — the surrounding Link is the actual target. */}
             <span className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">
               <Plus className="size-4" />
@@ -197,6 +218,7 @@ export default function GameScreen() {
                     game={game}
                     groupName={groupNames[game.groupJid] ?? null}
                     onDelete={handleDelete}
+                    onSaved={refresh}
                   />
                 ))}
               </div>
@@ -224,10 +246,218 @@ export default function GameScreen() {
   );
 }
 
-function GameCard({ game, groupName, onDelete }) {
+/** Hard ceiling mirrored from the backend validation. */
+const MAX_FLOW_SECONDS = 3600;
+
+/** A game's question-flow settings as editable string form state. */
+function flowDraft(game) {
+  return {
+    questionTimeSeconds:
+      game.questionTimeSeconds == null ? "" : String(game.questionTimeSeconds),
+    betweenQuestionsSeconds: String(game.betweenQuestionsSeconds ?? 6),
+    groupToDmDelaySeconds: String(game.groupToDmDelaySeconds ?? 5),
+    advanceMode: game.advanceMode ?? "auto",
+    dmQuestionVisibility: game.dmQuestionVisibility ?? "shown",
+  };
+}
+
+/** True for a whole number of seconds within [min, MAX_FLOW_SECONDS]. */
+function isWholeSeconds(value, min) {
+  return (
+    value !== "" &&
+    Number.isInteger(Number(value)) &&
+    Number(value) >= min &&
+    Number(value) <= MAX_FLOW_SECONDS
+  );
+}
+
+/** The popover form for a game's five question-flow settings. */
+function FlowEditPopover({
+  game,
+  open,
+  onOpenChange,
+  draft,
+  setDraft,
+  draftValid,
+  saving,
+  saveError,
+  onSave,
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        render={<Button variant="ghost" size="icon" aria-label="Edit question flow" />}
+      >
+        <Pencil className="size-4" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 space-y-3 p-4">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Question flow</p>
+          <p className="text-xs text-muted-foreground">
+            {game.status === "scheduled"
+              ? "Applied as soon as the game starts."
+              : "Applies from the next question forward."}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`${game.id}-qtime`}>Question time (sec)</Label>
+          <Input
+            id={`${game.id}-qtime`}
+            type="number"
+            min={1}
+            max={MAX_FLOW_SECONDS}
+            value={draft.questionTimeSeconds}
+            placeholder="Use each question's sheet value"
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, questionTimeSeconds: e.target.value }))
+            }
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor={`${game.id}-between`}>Pause (sec)</Label>
+            <Input
+              id={`${game.id}-between`}
+              type="number"
+              min={0}
+              max={MAX_FLOW_SECONDS}
+              value={draft.betweenQuestionsSeconds}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, betweenQuestionsSeconds: e.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`${game.id}-g2d`}>Group → DM (sec)</Label>
+            <Input
+              id={`${game.id}-g2d`}
+              type="number"
+              min={0}
+              max={MAX_FLOW_SECONDS}
+              value={draft.groupToDmDelaySeconds}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, groupToDmDelaySeconds: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label>Advance mode</Label>
+          <Select
+            value={draft.advanceMode}
+            onValueChange={(v) => setDraft((d) => ({ ...d, advanceMode: v }))}
+            items={[
+              { value: "auto", label: "Auto — after the pause" },
+              { value: "manual", label: "Manual — .next" },
+            ]}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto — after the pause</SelectItem>
+              <SelectItem value="manual">Manual — .next</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>DM poll wording</Label>
+          <Select
+            value={draft.dmQuestionVisibility}
+            onValueChange={(v) => setDraft((d) => ({ ...d, dmQuestionVisibility: v }))}
+            items={[
+              { value: "shown", label: "Show the question" },
+              { value: "hidden", label: "Number only (Q1, Q2…)" },
+            ]}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="shown">Show the question</SelectItem>
+              <SelectItem value="hidden">Number only (Q1, Q2…)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {!draftValid && (
+          <p className="text-xs text-destructive">
+            Times must be whole seconds (question time ≥ 1, pauses ≥ 0, all ≤{" "}
+            {MAX_FLOW_SECONDS}).
+          </p>
+        )}
+        {saveError && <p className="text-xs text-destructive">{saveError}</p>}
+        <Button className="w-full" disabled={!draftValid || saving} onClick={onSave}>
+          {saving ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <CheckCircle className="mr-2 size-4" />
+          )}
+          Save flow settings
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function GameCard({ game, groupName, onDelete, onSaved }) {
   const variant = STATUS_VARIANT[game.status] ?? "default";
   const label = STATUS_LABEL[game.status] ?? game.status;
   const group = groupName ?? game.groupName;
+  const editable = ["scheduled", "lobby", "running"].includes(game.status);
+  const manualLive = game.status === "running" && game.advanceMode === "manual";
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [draft, setDraft] = useState(() => flowDraft(game));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [nexting, setNexting] = useState(false);
+  const [nextError, setNextError] = useState("");
+
+  // Opening the popover samples the latest game (a background refetch may have
+  // changed it), so the draft is never stale when an edit begins.
+  function handleEditOpenChange(open) {
+    if (open) setDraft(flowDraft(game));
+    setEditOpen(open);
+  }
+
+  const draftValid =
+    (draft.questionTimeSeconds === "" ||
+      isWholeSeconds(draft.questionTimeSeconds, 1)) &&
+    isWholeSeconds(draft.betweenQuestionsSeconds, 0) &&
+    isWholeSeconds(draft.groupToDmDelaySeconds, 0);
+
+  /** Saves the five question-flow fields (all a live game may change). */
+  async function handleSave() {
+    if (!draftValid || saving) return;
+    setSaving(true);
+    setSaveError("");
+    const res = await updateGame(game.id, {
+      questionTimeSeconds:
+        draft.questionTimeSeconds === "" ? null : Number(draft.questionTimeSeconds),
+      betweenQuestionsSeconds: Number(draft.betweenQuestionsSeconds),
+      groupToDmDelaySeconds: Number(draft.groupToDmDelaySeconds),
+      advanceMode: draft.advanceMode,
+      dmQuestionVisibility: draft.dmQuestionVisibility,
+    });
+    setSaving(false);
+    if (res.ok) {
+      setEditOpen(false);
+      onSaved?.();
+    } else {
+      setSaveError(res.error || "Couldn't save the question flow.");
+    }
+  }
+
+  /** The dashboard side of manual advance (`{ action: "next" }`). */
+  async function handleNext() {
+    if (nexting) return;
+    setNexting(true);
+    setNextError("");
+    const res = await updateGame(game.id, { action: "next" });
+    setNexting(false);
+    if (res.ok) onSaved?.();
+    else setNextError(res.error || "Couldn't advance to the next question.");
+  }
 
   return (
     <Card className="overflow-hidden">
@@ -257,6 +487,13 @@ function GameCard({ game, groupName, onDelete }) {
                 <CheckCircle className="size-3" />
                 {game.playerCount} players
               </span>
+              {editable && (
+                <span className="flex items-center gap-1" title="Question-flow settings">
+                  <Settings2 className="size-3" />
+                  {game.questionTimeSeconds ? `${game.questionTimeSeconds}s` : "Sheet"} ·{" "}
+                  {game.advanceMode === "manual" ? "Manual" : "Auto"}
+                </span>
+              )}
               {game.hasPassword && (
                 <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
                   <AlertCircle className="size-3" />
@@ -265,22 +502,60 @@ function GameCard({ game, groupName, onDelete }) {
               )}
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onDelete(game.id)}
-            className="text-destructive hover:bg-destructive/10 shrink-0"
-            aria-label="Delete game"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            {editable && (
+              <FlowEditPopover
+                game={game}
+                open={editOpen}
+                onOpenChange={handleEditOpenChange}
+                draft={draft}
+                setDraft={setDraft}
+                draftValid={draftValid}
+                saving={saving}
+                saveError={saveError}
+                onSave={handleSave}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDelete(game.id)}
+              className="text-destructive hover:bg-destructive/10 shrink-0"
+              aria-label="Delete game"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       {game.status === "running" && (
         <CardFooter className="pt-0 border-t bg-muted/30">
-          <div className="text-xs text-muted-foreground">
-            Game is live — questions are being sent to players.
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-muted-foreground">
+              {manualLive ? (
+                <>
+                  Waiting for the host — send{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                    .next
+                  </code>{" "}
+                  in the group, or press Next question.
+                </>
+              ) : (
+                "Game is live — questions are being sent to players."
+              )}
+            </div>
+            {manualLive && (
+              <Button size="sm" onClick={handleNext} disabled={nexting}>
+                {nexting ? (
+                  <Loader2 className="mr-1.5 size-4 animate-spin" />
+                ) : (
+                  <SkipForward className="mr-1.5 size-4" />
+                )}
+                Next question
+              </Button>
+            )}
           </div>
+          {nextError && <p className="w-full text-xs text-destructive">{nextError}</p>}
         </CardFooter>
       )}
     </Card>

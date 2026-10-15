@@ -18,7 +18,6 @@ export const NAV_ITEMS = [
   { to: "/inbox", id: "inbox", label: "Inbox", icon: Inbox },
   // { to: "/status", id: "status", label: "Status", icon: CircleDashed },
   { to: "/contacts", id: "contacts", label: "Contacts", icon: Contact },
-  { to: "/game", id: "game", label: "Game", icon: Gamepad2 },
   {
     id: "power",
     label: "Power",
@@ -27,6 +26,7 @@ export const NAV_ITEMS = [
       { to: "/broadcasts", id: "broadcasts", label: "Broadcasts", icon: Megaphone },
       { to: "/guards", id: "guards", label: "Guards", icon: ShieldCheck },
       { to: "/automation", id: "automation", label: "Automation", icon: Zap },
+      { to: "/game", id: "game", label: "Games", icon: Gamepad2 },
     ],
   },
   { to: "/settings", id: "settings", label: "Settings", icon: Settings },

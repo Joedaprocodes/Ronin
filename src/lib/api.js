@@ -1168,6 +1168,11 @@ export async function listGameGroups() {
  * @property {number} minDelaySeconds
  * @property {number} maxDelaySeconds
  * @property {number} batchSize
+ * @property {number | null} questionTimeSeconds - per-question override; null uses each sheet row's time limit
+ * @property {number} betweenQuestionsSeconds - pause after the leaderboard (auto advance)
+ * @property {"auto"|"manual"} advanceMode - manual waits for `.next`
+ * @property {number} groupToDmDelaySeconds - reading pause between the group question text and the DM polls
+ * @property {"shown"|"hidden"} dmQuestionVisibility - whether DM poll names include the question wording
  * @property {number} questionCount
  * @property {boolean} hasPassword - true when a start password is set (never exposed)
  * @property {number} playerCount
@@ -1220,6 +1225,11 @@ export async function getGame(id) {
  * @property {number} [minDelaySeconds]
  * @property {number} [maxDelaySeconds]
  * @property {number} [batchSize]
+ * @property {number | null} [questionTimeSeconds] - null/omitted = use each question's sheet value
+ * @property {number} [betweenQuestionsSeconds]
+ * @property {"auto"|"manual"} [advanceMode]
+ * @property {number} [groupToDmDelaySeconds]
+ * @property {"shown"|"hidden"} [dmQuestionVisibility]
  * @property {GameQuestion[]} questions
  */
 
@@ -1311,6 +1321,47 @@ export async function cancelGame(id) {
     if (res.status === 401) error = "Not authorized (token missing or wrong)";
     else if (res.status === 404) error = "Game not found";
     else if (res.status === 409) error = "WhatsApp is not connected";
+
+    return { ok: false, status: res.status, error };
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message || "Network error" };
+  }
+}
+
+/**
+ * Edits a game (`PATCH /api/games/:id`).
+ *
+ * - **scheduled**: anything except the password (masked forever) — title, group,
+ *   start time, delays, questions and the question-flow fields.
+ * - **lobby / running**: only the question-flow fields (`questionTimeSeconds`,
+ *   `betweenQuestionsSeconds`, `advanceMode`, `groupToDmDelaySeconds`,
+ *   `dmQuestionVisibility`); they apply from the next question forward.
+ * - `{ action: "next" }` triggers a manual advance (the "Next question" button)
+ *   and returns the refreshed game; 409 when no question is waiting.
+ *
+ * @param {string} id
+ * @param {Partial<ScheduleInput> & { action?: "next" }} patch
+ * @returns {Promise<{ok: boolean, game?: GameDetail, status?: number, error?: string}>}
+ */
+export async function updateGame(id, patch) {
+  const token = import.meta.env.VITE_API_TOKEN;
+  try {
+    const res = await fetch(`${API_URL}/api/games/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "x-api-token": token } : {}),
+      },
+      body: JSON.stringify(patch ?? {}),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) return { ok: true, game: data?.game ?? null };
+
+    let error = data?.error || `Request failed (${res.status})`;
+    if (res.status === 401) error = "Not authorized (token missing or wrong)";
+    else if (res.status === 404) error = "Game not found";
 
     return { ok: false, status: res.status, error };
   } catch (err) {
