@@ -1434,7 +1434,6 @@ export default function ConversationScreen() {
                           !m.text &&
                           !m.media &&
                           !m.quoted &&
-                          totalVersions === 0 &&
                           !m.edited;
 
                         return (
