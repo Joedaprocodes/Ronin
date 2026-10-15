@@ -6,7 +6,7 @@ import {
   Zap,
   Settings,
   LayoutGrid,
-  CircleDashed,
+  Gamepad2,
 } from "lucide-react";
 
 /**
@@ -18,6 +18,7 @@ export const NAV_ITEMS = [
   { to: "/inbox", id: "inbox", label: "Inbox", icon: Inbox },
   // { to: "/status", id: "status", label: "Status", icon: CircleDashed },
   { to: "/contacts", id: "contacts", label: "Contacts", icon: Contact },
+  { to: "/game", id: "game", label: "Game", icon: Gamepad2 },
   {
     id: "power",
     label: "Power",

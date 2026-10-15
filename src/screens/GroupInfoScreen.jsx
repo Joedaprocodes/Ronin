@@ -148,7 +148,7 @@ function csvFilename(subject) {
  * participant's @username, else blank (the number identifies the row). Mirrors
  * the CSV Name column so the address book and the sheet agree.
  */
-function contactName(p) {
+function contactName() {
   return "";
 }
 

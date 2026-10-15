@@ -1130,3 +1130,190 @@ export async function listAutomationGroups() {
   const data = await apiFetch("/api/automation/groups");
   return Array.isArray(data?.groups) ? data.groups : [];
 }
+
+/* -------------------------------------------------------------------------- */
+/*  RoninClash Games                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A group offered for game scheduling. Only groups where the linked
+ * account is a member are returned (same shape as automation groups).
+ * @typedef {Object} GameGroup
+ * @property {string} jid
+ * @property {string | null} name
+ * @property {number} memberCount
+ */
+
+/**
+ * Groups where the linked account is a member (for the game group picker).
+ * Throws (the Error carries `.status`) so the screen can branch:
+ *   503 no WhatsApp connection configured, 409 socket not connected.
+ *
+ * @returns {Promise<GameGroup[]>}
+ */
+export async function listGameGroups() {
+  const data = await apiFetch("/api/games/groups");
+  return Array.isArray(data?.groups) ? data.groups : [];
+}
+
+/**
+ * A scheduled RoninClash game (summary for the list view).
+ * @typedef {Object} GameSummary
+ * @property {string} id
+ * @property {string} title
+ * @property {string} groupJid
+ * @property {string | null} groupName
+ * @property {"scheduled"|"lobby"|"running"|"finished"|"cancelled"} status
+ * @property {string} startAt - ISO-8601
+ * @property {number} minDelaySeconds
+ * @property {number} maxDelaySeconds
+ * @property {number} batchSize
+ * @property {number} questionCount
+ * @property {boolean} hasPassword - true when a start password is set (never exposed)
+ * @property {number} playerCount
+ * @property {string | null} hostJid
+ * @property {string} createdAt
+ */
+
+/**
+ * A game with full questions (for the schedule review / detail view).
+ * @typedef {GameSummary & { questions: GameQuestion[] }} GameDetail
+ */
+
+/** A question as stored in a game. */
+export const GAME_QUESTION_KEYS = ["question", "options", "correct", "timeLimit", "multi"];
+
+/**
+ * All games, optionally filtered by status and/or group.
+ * @param {{ status?: string, groupJid?: string }} [filters]
+ * @returns {Promise<GameSummary[]>}
+ */
+export async function listGames({ status, groupJid } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (groupJid) params.set("groupJid", groupJid);
+  const qs = params.toString();
+  const data = await apiFetch(`/api/games${qs ? `?${qs}` : ""}`);
+  return Array.isArray(data?.games) ? data.games : [];
+}
+
+/**
+ * One game with its questions and players. Throws on a 404.
+ * @param {string} id
+ * @returns {Promise<{ game: GameDetail | null, players: GamePlayer[] }>}
+ */
+export async function getGame(id) {
+  const data = await apiFetch(`/api/games/${encodeURIComponent(id)}`);
+  return {
+    game: data?.game ?? null,
+    players: Array.isArray(data?.players) ? data.players : [],
+  };
+}
+
+/**
+ * The writable shape of a game schedule.
+ * @typedef {Object} ScheduleInput
+ * @property {string} title
+ * @property {string} groupJid
+ * @property {string} password
+ * @property {string} startAt - ISO-8601
+ * @property {number} [minDelaySeconds]
+ * @property {number} [maxDelaySeconds]
+ * @property {number} [batchSize]
+ * @property {GameQuestion[]} questions
+ */
+
+/**
+ * Creates a new scheduled game. The API token (when configured) rides in the
+ * `x-api-token` header. On validation failure the backend returns
+ * `{ error, rowErrors? }` where rowErrors are spreadsheet row issues.
+ *
+ * @param {ScheduleInput} input
+ * @returns {Promise<{ok: boolean, game?: GameSummary, status?: number, error?: string, rowErrors?: {row: number, errors: string[]}[]}>}
+ */
+export async function createGame(input) {
+  const token = import.meta.env.VITE_API_TOKEN;
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { "x-api-token": token } : {}),
+  };
+
+  try {
+    const res = await fetch(`${API_URL}/api/games`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(input ?? {}),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      return { ok: true, game: data?.game ?? null };
+    }
+
+    // Propagate row-level errors so the UI can point at specific spreadsheet rows.
+    let error = data?.error || `Request failed (${res.status})`;
+    if (res.status === 401) {
+      error = "Not authorized (token missing or wrong)";
+    } else if (res.status === 404) {
+      error = "Group not found or bot not in group";
+    } else if (res.status === 409) {
+      error = "WhatsApp is not connected";
+    } else if (res.status === 502) {
+      error = "Group metadata could not be read";
+    } else if (res.status === 503) {
+      error = "No game store configured";
+    }
+
+    return { ok: false, status: res.status, error, rowErrors: data?.rowErrors };
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message || "Network error" };
+  }
+}
+
+/**
+ * A registered player in a game.
+ * @typedef {Object} GamePlayer
+ * @property {string} jid
+ * @property {string | null} name
+ * @property {string} joinedAt
+ * @property {number} points
+ * @property {number} correctCount
+ * @property {number} totalTimeMs
+ */
+
+/**
+ * Cancels (deletes) a scheduled/lobby/running game.
+ * @param {string} id
+ * @returns {Promise<{ok: boolean, status?: number, error?: string}>}
+ */
+export async function cancelGame(id) {
+  const token = import.meta.env.VITE_API_TOKEN;
+  const headers = {
+    ...(token ? { "x-api-token": token } : {}),
+  };
+
+  try {
+    const res = await fetch(`${API_URL}/api/games/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers,
+    });
+
+    if (res.ok) return { ok: true };
+
+    let error = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) error = body.error;
+    } catch {
+      // ignore
+    }
+    if (res.status === 401) error = "Not authorized (token missing or wrong)";
+    else if (res.status === 404) error = "Game not found";
+    else if (res.status === 409) error = "WhatsApp is not connected";
+
+    return { ok: false, status: res.status, error };
+  } catch (err) {
+    return { ok: false, status: 0, error: err?.message || "Network error" };
+  }
+}
