@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -6,7 +7,6 @@ import {
   Loader2,
   Lock,
   Upload,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import ScreenHeader from "@/components/ScreenHeader";
 import { createGame, listGameGroups } from "@/lib/api";
 import { parseQuestionsFile } from "@/lib/gameQuestions";
 
@@ -64,16 +65,17 @@ function formatStart(dateStr, timeStr) {
 }
 
 /**
- * RoninClash "Schedule game" form, rendered by GameScreen as a full-screen
- * overlay (`onClose` dismisses, `onCreated` fires once the server accepted
- * the schedule).
+ * RoninClash "Schedule game" form at /game/roninclash — a normal routed screen
+ * (the back arrow returns to /game, which refetches on mount so a newly
+ * scheduled game shows up immediately under "Scheduled").
  *
  * The .xlsx spreadsheet is parsed and validated on upload: row-level errors
  * are listed and Confirm stays disabled until the sheet is clean. Once saved,
  * the start password is only ever shown masked — the API never returns it
  * again (the server view exposes `hasPassword` only).
  */
-export default function RoninClashScreen({ onClose, onCreated }) {
+export default function RoninClashScreen() {
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const [groups, setGroups] = useState([]);
@@ -212,7 +214,6 @@ export default function RoninClashScreen({ onClose, onCreated }) {
     if (result.ok) {
       // The password is never rendered again — only `hasPassword` comes back.
       setSaved(result.game);
-      onCreated?.(result.game);
       return;
     }
     setSubmitError(result.error || "Couldn't schedule the game.");
@@ -224,13 +225,13 @@ export default function RoninClashScreen({ onClose, onCreated }) {
 
   if (saved) {
     return (
-      <div
-        className="fixed inset-0 z-50 overflow-y-auto bg-background"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Game scheduled"
-      >
-        <div className="mx-auto w-full max-w-2xl px-4 pb-16 pt-6">
+      <div className="mx-auto w-full max-w-2xl space-y-4 py-4">
+        <ScreenHeader
+          title="Game scheduled"
+          subtitle="RoninClash trivia round"
+          back="/game"
+        />
+        <div className="space-y-4">
           <Card>
             <CardHeader className="text-center">
               <CheckCircle2 className="mx-auto size-10 text-green-600 dark:text-green-500" />
@@ -284,7 +285,7 @@ export default function RoninClashScreen({ onClose, onCreated }) {
               </div>
             </CardContent>
             <CardFooter>
-              <Button className="w-full" onClick={onClose}>
+              <Button className="w-full" onClick={() => navigate("/game")}>
                 Done
               </Button>
             </CardFooter>
@@ -296,25 +297,14 @@ export default function RoninClashScreen({ onClose, onCreated }) {
   /* -------------------------------- form --------------------------------- */
 
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-background"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Schedule RoninClash"
-    >
-      <div className="mx-auto w-full max-w-2xl px-4 pb-16 pt-4">
-        <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-xl">
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold leading-5">Schedule game</h1>
-            <p className="truncate text-xs leading-4 text-muted-foreground">
-              RoninClash trivia round
-            </p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-            <X className="size-4" />
-          </Button>
-        </header>
+    <div className="mx-auto w-full max-w-2xl space-y-4 py-4">
+      <ScreenHeader
+        title="Schedule game"
+        subtitle="RoninClash trivia round"
+        back="/game"
+      />
 
+      <div className="space-y-4">
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Details ------------------------------------------------------- */}
           <Card>
@@ -618,7 +608,7 @@ export default function RoninClashScreen({ onClose, onCreated }) {
             <Button
               type="button"
               variant="outline"
-              onClick={onClose}
+              onClick={() => navigate("/game")}
               className="flex-1"
             >
               Cancel

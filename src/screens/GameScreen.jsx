@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Gamepad2, Loader2, Plus, Trash2, Clock, CheckCircle, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,6 @@ import { cn } from "@/lib/utils";
 import ScreenHeader from "@/components/ScreenHeader";
 import { listGames, cancelGame, listGameGroups } from "@/lib/api";
 import { useInboxEventsListener } from "@/context/InboxEventsContext";
-import RoninClashScreen from "./RoninClashScreen";
 
 const STATUS_VARIANT = {
   scheduled: "default",
@@ -55,10 +55,10 @@ function statusDot(variant) {
 }
 
 export default function GameScreen() {
+  const navigate = useNavigate();
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
   const [groupNames, setGroupNames] = useState({});
 
   // Groups give the cards display names (the API only stores the group jid).
@@ -100,6 +100,20 @@ export default function GameScreen() {
     refresh();
   });
 
+  // A missed SSE frame would otherwise leave stale counts (e.g. players who
+  // just voted "I'm in") on the cards — refetch whenever the tab comes back.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (!document.hidden) refresh();
+    };
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [refresh]);
+
   async function handleDelete(id) {
     if (!window.confirm("Delete this game? Players and answers will be removed.")) return;
     const res = await cancelGame(id);
@@ -120,30 +134,36 @@ export default function GameScreen() {
     <div className="mx-auto w-full max-w-2xl space-y-4 py-4">
       <ScreenHeader title="Game" subtitle="RoninClash trivia" />
 
-      {/* The available-games list. Only RoninClash exists for now; opening it
-          shows the "Schedule game" form. */}
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <div className="flex items-start gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent">
-              <Gamepad2 className="size-5" />
+      {/* The available-games list: only RoninClash exists for now. The whole
+          card navigates to its route (/game/roninclash). */}
+      <Link
+        to="/game/roninclash"
+        className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Card className="overflow-hidden transition-colors hover:border-ring/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent">
+                <Gamepad2 className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <CardTitle>RoninClash</CardTitle>
+                <CardDescription>
+                  Group trivia: players join with a poll, answer each question as a
+                  private DM poll, and score points for speed and accuracy.
+                </CardDescription>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <CardTitle>RoninClash</CardTitle>
-              <CardDescription>
-                Group trivia: players join with a poll, answer each question as a
-                private DM poll, and score points for speed and accuracy.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardFooter className="pt-0">
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus className="mr-2 size-4" />
-            Schedule game
-          </Button>
-        </CardFooter>
-      </Card>
+          </CardHeader>
+          <CardFooter className="pt-0">
+            {/* Visual CTA only — the surrounding Link is the actual target. */}
+            <span className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">
+              <Plus className="size-4" />
+              Schedule game
+            </span>
+          </CardFooter>
+        </Card>
+      </Link>
 
       {loading ? (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -191,7 +211,7 @@ export default function GameScreen() {
                 <p className="text-sm text-muted-foreground/70 mt-1">
                   Tap "Schedule" to create your first RoninClash trivia round.
                 </p>
-                <Button onClick={() => setShowCreate(true)} className="mt-4">
+                <Button onClick={() => navigate("/game/roninclash")} className="mt-4">
                   <Plus className="mr-2 size-4" />
                   Schedule a game
                 </Button>
@@ -199,13 +219,6 @@ export default function GameScreen() {
             </Card>
           )}
         </>
-      )}
-
-      {showCreate && (
-        <RoninClashScreen
-          onClose={() => setShowCreate(false)}
-          onCreated={refresh}
-        />
       )}
     </div>
   );

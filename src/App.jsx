@@ -19,6 +19,7 @@ import SettingsScreen from './screens/SettingsScreen'
 import GuardsScreen from './screens/GuardsScreen'
 import AutomationScreen from './screens/AutomationScreen'
 import GameScreen from './screens/GameScreen'
+import RoninClashScreen from './screens/RoninClashScreen'
 import LoginScreen from './screens/LoginScreen'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
@@ -77,6 +78,7 @@ function Shell() {
             <Route path="/guards" element={<GuardsScreen />} />
             <Route path="/automation" element={<AutomationScreen />} />
             <Route path="/game" element={<GameScreen />} />
+            <Route path="/game/roninclash" element={<RoninClashScreen />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
